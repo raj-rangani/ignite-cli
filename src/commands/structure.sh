@@ -14,6 +14,7 @@ source "${PARENT_DIR}/utils/git.sh"
 # Function to clone a Node.js project
 function create_nodejs_project() {
     local project_dir="$1"
+    local project_name="$2"
     local os_type=$(get_os_type)
     
     log_debug "Creating project directory: ${project_dir} (OS: ${os_type})"
@@ -42,18 +43,180 @@ function create_nodejs_project() {
         fi
     fi
     
+    # Create a temporary directory for Node.js template files
+    log_info "Creating Node.js project template..."
+    mkdir -p temp_nodejs
+    
+    # Create package.json
+    cat > temp_nodejs/package.json << EOF
+{
+  "name": "${project_name}",
+  "version": "1.0.0",
+  "description": "A Node.js application created with the Developer CLI Tool",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}
+EOF
+    
+    # Create index.js
+    cat > temp_nodejs/index.js << EOF
+// Load environment variables from .env file
+require('dotenv').config();
+
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
+
+// Middleware for JSON parsing
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Define routes
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Welcome to your Node.js API!',
+    app_name: '${project_name}'
+  });
+});
+
+// Start the server
+app.listen(port, () => {
+  console.log(\`Server is running on http://localhost:\${port}\`);
+});
+EOF
+    
+    # Create .env and .env.example
+    cat > temp_nodejs/.env << EOF
+# Environment Configuration
+NODE_ENV=development
+PORT=3000
+API_PREFIX=/api/v1
+
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=${project_name}_db
+DB_USER=dbuser
+DB_PASSWORD=dev_password
+
+# JWT Configuration
+JWT_SECRET=replace_this_with_a_secure_random_string
+JWT_EXPIRES_IN=24h
+
+# Application Settings
+APP_NAME=${project_name}-api
+LOG_LEVEL=debug
+EOF
+    
+    # Create .env.example (same as .env but without sensitive values)
+    cat > temp_nodejs/.env.example << EOF
+# Environment Configuration
+NODE_ENV=development
+PORT=3000
+API_PREFIX=/api/v1
+
+# Database Configuration
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=${project_name}_db
+DB_USER=dbuser
+DB_PASSWORD=
+
+# JWT Configuration
+JWT_SECRET=
+JWT_EXPIRES_IN=24h
+
+# Application Settings
+APP_NAME=${project_name}-api
+LOG_LEVEL=debug
+EOF
+    
+    # Create .gitignore
+    cat > temp_nodejs/.gitignore << EOF
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Build output
+dist/
+build/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+EOF
+    
+    # Create README.md
+    cat > temp_nodejs/README.md << EOF
+# ${project_name}
+
+A Node.js application created with the Developer CLI Tool.
+
+## Getting Started
+
+1. Install dependencies:
+   \`\`\`
+   npm install
+   \`\`\`
+
+2. Configure environment variables in \`.env\` file.
+
+3. Start the development server:
+   \`\`\`
+   npm run dev
+   \`\`\`
+
+4. For production:
+   \`\`\`
+   npm start
+   \`\`\`
+
+## Project Structure
+
+- \`index.js\` - Main application entry point
+- \`.env\` - Environment variables
+- \`package.json\` - Project configuration
+
+## License
+
+ISC
+EOF
+    
     # Move files from temp directory to project directory
+    cd "${project_dir}" || return 1
     cp -r temp_nodejs/* .
     cp -r temp_nodejs/.* . 2>/dev/null || true
     
     # Cleanup
     rm -rf temp_nodejs
-    rm -rf .git
-    
-    # Update package.json with project name
-    if [ -f "package.json" ]; then
-        sed -i "s/\"name\": \".*\"/\"name\": \"${project_name}\"/" package.json
-    fi
     
     log_success "Node.js project structure created successfully"
     echo "PROJECT_DIRECTORY:${project_dir}"
