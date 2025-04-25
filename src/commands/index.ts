@@ -6,5 +6,6 @@ export function load(client: any): any {
   }
 
   client.init = loadCommand("init");
+  client["init:flutter"] = loadCommand("flutter");
   return client;
 }
