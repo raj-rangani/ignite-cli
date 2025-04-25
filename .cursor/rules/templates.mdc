@@ -1,0 +1,14 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Project Templates
+
+The ignite-cli includes templates for various types of projects:
+
+- [mobile/](mdc:src/templates/mobile): Templates for mobile development (Flutter, React Native)
+- [backend/](mdc:src/templates/backend): Templates for backend development (Node.js, Laravel)
+- [frontend/](mdc:src/templates/frontend): Templates for frontend development (React, Vue, Angular)
+
+These templates are used when generating project structures with the `structure` command.

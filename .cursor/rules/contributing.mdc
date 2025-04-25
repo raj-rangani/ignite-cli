@@ -1,0 +1,21 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Contribution Guidelines
+
+When contributing to the ignite-cli project:
+
+1. Follow the existing code structure:
+   - Put new command implementations in [src/commands/](mdc:src/commands)
+   - Put utility functions in [src/utils/](mdc:src/utils)
+   - Add new templates in the appropriate [src/templates/](mdc:src/templates) subdirectory
+
+2. Use the existing logging functions from [logger.sh](mdc:src/utils/logger.sh) for consistent output
+
+3. Validate user inputs using functions from [validators.sh](mdc:src/utils/validators.sh)
+
+4. Handle errors properly and report appropriate log messages
+
+5. Test your changes thoroughly with different input combinations

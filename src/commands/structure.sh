@@ -46,10 +46,14 @@ function get_template_dir() {
 # Function to create a project directory
 function create_project_dir() {
     local project_dir="$1"
+    local os_type=$(get_os_type)
+    
+    log_debug "Creating project directory: ${project_dir} (OS: ${os_type})"
     
     # Check if directory already exists
-    if [[ -d "${project_dir}" ]]; then
-        if [[ "$(ls -A "${project_dir}" 2>/dev/null)" ]]; then
+    if directory_exists "${project_dir}"; then
+        # Check if directory is empty in a cross-platform way
+        if read_directory "${project_dir}" > /dev/null 2>&1; then
             log_info "Directory already exists and is not empty: ${project_dir}"
             
             # If using current directory, just proceed without asking
@@ -63,9 +67,8 @@ function create_project_dir() {
             fi
         fi
     else
-        # Create the directory
-        mkdir -p "${project_dir}"
-        if [[ $? -ne 0 ]]; then
+        # Create the directory using cross-platform function
+        if ! create_directory "${project_dir}"; then
             log_error "Failed to create project directory: ${project_dir}"
             return 1
         fi

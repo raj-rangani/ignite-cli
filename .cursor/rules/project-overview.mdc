@@ -1,0 +1,21 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Project Overview
+
+This CLI tool, ignite-cli, is designed to streamline the development environment setup for mobile, backend, and frontend developers.
+
+## Main Components
+
+- Entry point: [bin/dev-cli.sh](mdc:bin/dev-cli.sh)
+- Command implementations: [src/commands](mdc:src/commands)
+- Utility functions: [src/utils](mdc:src/utils)
+- Project templates: [src/templates](mdc:src/templates)
+
+## Developer Workflow
+
+1. The user selects their developer role (mobile, backend, frontend)
+2. The user selects a framework based on their role
+3. The tool helps with repository cloning, project structure generation, and configuration

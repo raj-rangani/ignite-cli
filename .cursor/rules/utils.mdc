@@ -1,0 +1,17 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Utility Functions
+
+The ignite-cli uses the following utility modules:
+
+- [logger.sh](mdc:src/utils/logger.sh): Functions for logging messages at different levels
+- [validators.sh](mdc:src/utils/validators.sh): Input validation functions
+- [config.sh](mdc:src/utils/config.sh): Configuration management functions
+- [git.sh](mdc:src/utils/git.sh): Git operations helper functions
+- [shell.sh](mdc:src/utils/shell.sh): Shell command execution utilities
+- [prompts.sh](mdc:src/utils/prompts.sh): User interaction and prompt functions
+
+These utility functions are sourced in the main script and used throughout the codebase.

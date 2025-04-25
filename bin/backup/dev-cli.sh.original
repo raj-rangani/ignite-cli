@@ -21,6 +21,110 @@ source "$PARENT_DIR/src/utils/git.sh"
 source "$PARENT_DIR/src/utils/shell.sh"
 source "$PARENT_DIR/src/utils/prompts.sh"
 
+# Function to create a new Flutter project
+function create_flutter_project() {
+    local project_name=""
+    local org_id=""
+    
+    # Check if Flutter is installed
+    if ! command -v flutter &> /dev/null; then
+        log_error "Flutter SDK not found. Please install Flutter first."
+        log_info "Visit https://flutter.dev/docs/get-started/install for installation instructions."
+        return 1
+    fi
+    
+    # First check if we have previously saved values from flutter.sh command
+    saved_project_name=$(get_config "FLUTTER_PROJECT_NAME")
+    saved_org_id=$(get_config "FLUTTER_ORG_ID")
+    
+    if [[ -n "${saved_project_name}" && -n "${saved_org_id}" ]]; then
+        log_info "Found previously configured Flutter project details:"
+        log_info "Project name: ${saved_project_name}"
+        log_info "Organization ID: ${saved_org_id}"
+        
+        read -p "Would you like to use these values? (yes/no): " use_saved
+        if [[ "${use_saved}" == "yes" || "${use_saved}" == "y" ]]; then
+            project_name="${saved_project_name}"
+            org_id="${saved_org_id}"
+        else
+            # Clear saved values if not using them
+            set_config "FLUTTER_PROJECT_NAME" ""
+            set_config "FLUTTER_ORG_ID" ""
+        fi
+    fi
+    
+    # If we don't have values from saved config, prompt for them
+    if [[ -z "${project_name}" || -z "${org_id}" ]]; then
+        # Ask for project name with validation
+        log_section "Create Flutter Project"
+        log_info "Please provide the details for your new Flutter project."
+        echo ""
+        
+        # Prompt for project name with validation
+        while true; do
+            read -p "Enter project name (lowercase with underscores, e.g., my_app): " project_name
+            
+            # Validate project name (Flutter requires lowercase with underscores)
+            if [[ "${project_name}" =~ ^[a-z][a-z0-9_]*$ ]]; then
+                break
+            else
+                log_error "Invalid project name. Please use lowercase letters, numbers, and underscores only, starting with a letter."
+            fi
+        done
+        
+        # Prompt for organization ID with validation
+        while true; do
+            read -p "Enter organization ID (reverse domain, e.g., com.example): " org_id
+            
+            # Validate org ID (should be a reverse domain format)
+            if [[ "${org_id}" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]]; then
+                break
+            else
+                log_error "Invalid organization ID. Please use reverse domain format (e.g., com.example)."
+            fi
+        done
+        
+        # Save the new values to config for future use
+        set_config "FLUTTER_PROJECT_NAME" "${project_name}"
+        set_config "FLUTTER_ORG_ID" "${org_id}"
+    fi
+
+    # Confirm the details
+    echo ""
+    log_info "You're about to create a Flutter project with the following details:"
+    log_info "Project name: ${project_name}"
+    log_info "Organization ID: ${org_id}"
+    
+    read -p "Proceed? (yes/no): " proceed
+    if [[ "${proceed}" != "yes" && "${proceed}" != "y" ]]; then
+        log_info "Operation cancelled."
+        return 0
+    fi
+    
+    # Create the Flutter project
+    log_info "Creating Flutter project..."
+    flutter create --org "${org_id}" "${project_name}"
+    
+    # Check if the project was created successfully
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create Flutter project."
+        return 1
+    fi
+    
+    # Add a message about the next steps
+    log_success "Flutter project created successfully!"
+    log_info "Project directory: $(pwd)/${project_name}"
+    log_info ""
+    log_info "Next steps:"
+    log_info "1. Navigate to your project: cd ${project_name}"
+    log_info "2. Run your app: flutter run"
+    
+    # Set Flutter as the selected framework
+    set_config "SELECTED_FRAMEWORK" "flutter"
+    
+    return 0
+}
+
 # Flag to track if database configuration has been done
 DB_CONFIG_DONE=false
 
@@ -371,9 +475,7 @@ function generate_default_env_file() {
             echo "APP_NAME=${framework}-api"
             echo "LOG_LEVEL=${is_production:+info}${is_production:-debug}"
         } >> "${target_file}"
-    fi
-    
-    if [[ "${framework}" == "react" || "${framework}" == "vue" || "${framework}" == "angular" ]]; then
+            echo "LOG_LEVEL=${is_production:+info}${is_production:-debug}"mework}" == "angular" ]]; then
         # Frontend-specific configuration
         {
             echo "REACT_APP_API_URL=http://localhost:3000/api"
@@ -760,18 +862,18 @@ function setup_db_configuration() {
     log_debug "Entering setup_db_configuration function. DB_CONFIG_DONE=${DB_CONFIG_DONE}"
     
     local framework=$(get_config "SELECTED_FRAMEWORK")
-    local force_configuration="${1:-false}"
     
-    # Skip if already configured in this session and not forcing reconfiguration
-    if [[ "${DB_CONFIG_DONE}" == "true" && "${force_configuration}" != "true" ]]; then
+    # Skip if already configured in this session
+    if [[ "${DB_CONFIG_DONE}" == "true" ]]; then
         log_info "Database configuration already completed in this session."
-        log_debug "Skipping DB configuration as DB_CONFIG_DONE is true and not forcing"
+        log_debug "Skipping DB configuration as DB_CONFIG_DONE is true"
         return 0
     fi
     
     # For backend frameworks, we require database configuration
     local is_backend=false
-    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" ]]; then
+    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" || 
+          "${framework}" == "mern" || "${framework}" == "mean" ]]; then
         is_backend=true
     fi
     
@@ -843,8 +945,8 @@ function setup_db_configuration() {
         
         if grep -q "# Database Configuration" .env; then
             log_info "Updating existing database configuration..."
-            # Copy all lines before the database section to temp file
-            sed '/# Database Configuration/,$d' .env > "${env_temp}" || true
+            # Copy all lines except the database section to temp file
+            grep -v -A 10 "# Database Configuration" .env > "${env_temp}" || true
         else
             # Just copy the entire file for appending
             cp .env "${env_temp}"
@@ -863,7 +965,7 @@ function setup_db_configuration() {
         
         # Framework-specific environment variables
         case "${framework}" in
-            nodejs)
+            nodejs|mern|mean)
                 # Add other essential Node.js configuration if not already present
                 if ! grep -q "JWT_SECRET" "${env_temp}"; then
                     {
@@ -884,36 +986,19 @@ function setup_db_configuration() {
                 fi
                 
                 # MongoDB connection string if this is a MongoDB project
-                local use_mongodb=""
-                read -p "Are you using MongoDB? (y/n, default: n): " use_mongodb
-                use_mongodb=$(echo "${use_mongodb}" | tr '[:upper:]' '[:lower:]')
-                
-                if [[ "${use_mongodb}" == "y" || "${use_mongodb}" == "yes" ]]; then
-                    log_info "Setting up MongoDB connection..."
+                if prompt_yesno "Are you using MongoDB?" "n"; then
                     local mongo_uri="mongodb://"
-                    
                     if [[ -n "${DB_USER}" && -n "${DB_PASSWORD}" ]]; then
                         mongo_uri="${mongo_uri}${DB_USER}:${DB_PASSWORD}@"
                     fi
-                    
                     mongo_uri="${mongo_uri}${DB_HOST}"
-                    
                     if [[ -n "${DB_PORT}" ]]; then
                         mongo_uri="${mongo_uri}:${DB_PORT}"
                     fi
-                    
                     if [[ -n "${DB_NAME}" ]]; then
                         mongo_uri="${mongo_uri}/${DB_NAME}"
                     fi
-                    
-                    echo "" >> "${env_temp}"
-                    echo "# MongoDB Configuration" >> "${env_temp}" 
                     echo "MONGODB_URI=${mongo_uri}" >> "${env_temp}"
-                    echo "MONGODB_DB_NAME=${DB_NAME}" >> "${env_temp}"
-                    
-                    log_success "MongoDB configuration added to .env file"
-                else
-                    log_info "Skipping MongoDB configuration."
                 fi
                 ;;
             laravel)
@@ -934,72 +1019,54 @@ function setup_db_configuration() {
         # Move temp file back to .env
         mv "${env_temp}" .env
         
-        # Display the generated .env file contents
-        log_info "Generated .env file with the following configuration:"
-        echo "-------------- .env file contents --------------"
-        cat .env
-        echo "------------------------------------------------"
-        
         log_success "Database configuration added to .env file"
         DB_CONFIG_DONE=true
         export DB_CONFIG_DONE
         log_debug "DB configuration completed. DB_CONFIG_DONE set to true"
     # For non-backend projects, make it optional
-    else
-        local configure_db=""
-        read -p "Would you like to configure database connection now? (y/n, default: y): " configure_db
-        configure_db=$(echo "${configure_db}" | tr '[:upper:]' '[:lower:]')
+    elif prompt_yesno "Would you like to configure database connection now?" "y"; then
+        log_info "Setting up database configuration..."
         
-        if [[ "${configure_db}" == "y" || "${configure_db}" == "yes" || -z "${configure_db}" ]]; then
-            log_info "Setting up database configuration..."
-            
-            # Get database credentials
-            get_db_credentials
-            
-            # Create .env file if it doesn't exist
-            if [[ ! -f ".env" ]]; then
-                log_info "Creating .env file..."
-                generate_default_env_file "${framework}" ".env"
-            fi
-            
-            # Add to .env file - always overwrite existing database config
-            local env_temp=$(mktemp)
-            TEMP_FILES+=("${env_temp}")
-            
-            if grep -q "# Database Configuration" .env; then
-                log_info "Updating existing database configuration..."
-                # Copy all lines before the database section to temp file
-                sed '/# Database Configuration/,$d' .env > "${env_temp}" || true
-            else
-                # Just copy the entire file for appending
-                cp .env "${env_temp}"
-            fi
-            
-            # Now add the new database configuration
-            {
-                echo ""
-                echo "# Database Configuration"
-                echo "DB_HOST=${DB_HOST}"
-                echo "DB_PORT=${DB_PORT}"
-                echo "DB_NAME=${DB_NAME}"
-                echo "DB_USER=${DB_USER}"
-                echo "DB_PASSWORD=${DB_PASSWORD}"
-            } >> "${env_temp}"
-            
-            # Move temp file back to .env
-            mv "${env_temp}" .env
-            
-            # Display the generated .env file contents
-            log_info "Generated .env file with the following configuration:"
-            echo "-------------- .env file contents --------------"
-            cat .env
-            echo "------------------------------------------------"
-            
-            log_success "Database configuration added to .env file"
-            DB_CONFIG_DONE=true
-            export DB_CONFIG_DONE
-            log_debug "DB configuration completed. DB_CONFIG_DONE set to true"
+        # Get database credentials
+        get_db_credentials
+        
+        # Create .env file if it doesn't exist
+        if [[ ! -f ".env" ]]; then
+            log_info "Creating .env file..."
+            generate_default_env_file "${framework}" ".env"
         fi
+        
+        # Add to .env file - always overwrite existing database config
+        local env_temp=$(mktemp)
+        TEMP_FILES+=("${env_temp}")
+        
+        if grep -q "# Database Configuration" .env; then
+            log_info "Updating existing database configuration..."
+            # Copy all lines except the database section to temp file
+            grep -v -A 10 "# Database Configuration" .env > "${env_temp}" || true
+        else
+            # Just copy the entire file for appending
+            cp .env "${env_temp}"
+        fi
+        
+        # Now add the new database configuration
+        {
+            echo ""
+            echo "# Database Configuration"
+            echo "DB_HOST=${DB_HOST}"
+            echo "DB_PORT=${DB_PORT}"
+            echo "DB_NAME=${DB_NAME}"
+            echo "DB_USER=${DB_USER}"
+            echo "DB_PASSWORD=${DB_PASSWORD}"
+        } >> "${env_temp}"
+        
+        # Move temp file back to .env
+        mv "${env_temp}" .env
+        
+        log_success "Database configuration added to .env file"
+        DB_CONFIG_DONE=true
+        export DB_CONFIG_DONE
+        log_debug "DB configuration completed. DB_CONFIG_DONE set to true"
     fi
 }
 
@@ -1171,7 +1238,8 @@ function fix_nested_directories() {
     fi
 
     # Check for missing .env file for backend frameworks - ALWAYS create one for Node.js projects
-    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" ]] && [[ "${DB_CONFIG_DONE}" != "true" ]]; then
+    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" || 
+         "${framework}" == "mern" || "${framework}" == "mean" ]] && [[ "${DB_CONFIG_DONE}" != "true" ]]; then
         
         log_debug "Checking for .env file in backend framework. DB_CONFIG_DONE=${DB_CONFIG_DONE}"
         
@@ -1186,7 +1254,7 @@ function fix_nested_directories() {
             }
             
             log_success "Created .env file from template."
-            setup_db_configuration "true"  # Always force configuration for clarity
+            setup_db_configuration
         # No .env and no .env.example
         elif [[ ! -f ".env" ]]; then
             log_info "No .env file found. Setting up environment configuration..."
@@ -1196,22 +1264,19 @@ function fix_nested_directories() {
             
             log_success "Created basic .env file with default configuration."
             
-            # Ask if user wants to customize the default database configuration
-            local customize_db=""
-            read -p "A default database configuration has been created. Would you like to customize it? (y/n, default: y): " customize_db
-            customize_db=$(echo "${customize_db}" | tr '[:upper:]' '[:lower:]')
+            # Set DB_CONFIG_DONE to true because we've created a default config
+            DB_CONFIG_DONE=true
+            export DB_CONFIG_DONE
+            log_debug "DB_CONFIG_DONE set to true after creating default .env file"
             
-            if [[ "${customize_db}" == "y" || "${customize_db}" == "yes" || -z "${customize_db}" ]]; then
-                # Force reconfiguration even if DB_CONFIG_DONE is true
-                setup_db_configuration "true"
+            # Ask if user wants to customize the default database configuration
+            if prompt_yesno "A default database configuration has been created. Would you like to customize it?" "y"; then
+                setup_db_configuration
             else
                 log_info "Using default database configuration. You can modify the .env file later if needed."
-                # We still need to set DB_CONFIG_DONE to true
-                DB_CONFIG_DONE=true
-                export DB_CONFIG_DONE
-                log_debug "User declined custom DB config. DB_CONFIG_DONE set to true"
+                log_debug "User declined custom DB config. Continuing workflow with DB_CONFIG_DONE=${DB_CONFIG_DONE}"
             fi
-            log_debug "Completed environment setup. Proceeding to next step."
+            log_debug "Completed nested directory and environment setup. Proceeding to next step."
         fi
     fi
 }
@@ -1244,7 +1309,7 @@ function check_script_syntax() {
 function start_guided_workflow {
     # Initialize step names for better logging
     declare -A STEP_NAMES
-    STEP_NAMES[1]="Init and TechStack Selection"
+    STEP_NAMES[1]="Developer Role Selection"
     STEP_NAMES[2]="Framework Selection"
     STEP_NAMES[3]="Project Source"
     STEP_NAMES[4]="Project Structure"
@@ -1260,9 +1325,8 @@ function start_guided_workflow {
         set_debug_mode "true"
     fi
     
-    # Don't clear screen to maintain history
-    # clear  <- Remove this line
-    log_section "Ignite CLI Tool - Project Setup"
+    clear
+    log_section "Developer CLI Tool - Guided Project Setup"
     log_info "Welcome to the project setup workflow. You will be guided through each step in sequence."
     echo ""
     
@@ -1276,20 +1340,21 @@ function start_guided_workflow {
     set_config "DEVELOPER_ROLE" ""
     set_config "SELECTED_FRAMEWORK" ""
     
-    # Step 1: TechStack Selection (Previously Developer Role Selection)
-    track_step 1 "TechStack Selection"
-    log_section "STEP ${CURRENT_STEP}: TechStack Selection"
-    log_info "Let's start by selecting your tech stack for this project."
+    # Step 1: Developer Role Selection
+    track_step 1 "Developer Role Selection"
+    log_section "STEP ${CURRENT_STEP}: Developer Role Selection"
+    log_info "Let's start by selecting your developer role for this project."
     
     local role=""
     while [[ -z "${role}" ]]; do
-        echo "Available Tech Stacks:"
-        echo "  1. Frontend"
-        echo "  2. Backend"
-        echo "  3. Mobile"
+        echo "Available roles:"
+        echo "  1. Frontend Developer"
+        echo "  2. Backend Developer"
+        echo "  3. Mobile Developer"
+        echo "  4. Full Stack Developer"
         echo ""
         
-        read -p "Enter your choice (1-3): " role_choice
+        read -p "Enter your choice (1-4): " role_choice
         
         case "${role_choice}" in
             1)
@@ -1301,15 +1366,18 @@ function start_guided_workflow {
             3)
                 role="mobile"
                 ;;
+            4)
+                role="fullstack"
+                ;;
             *)
-                log_error "Invalid choice. Please select a number between 1 and 3."
+                log_error "Invalid choice. Please select a number between 1 and 4."
                 role=""
                 ;;
         esac
     done
     
     set_config "DEVELOPER_ROLE" "${role}"
-    log_success "Tech Stack set to: ${role}"
+    log_success "Developer role set to: ${role}"
     finish_step 1
     echo ""
     
@@ -1380,12 +1448,38 @@ function start_guided_workflow {
                 case "${framework_choice}" in
                     1)
                         framework="flutter"
+                        # If Flutter is selected, create a Flutter project right away
+                        create_flutter_project
                         ;;
                     2)
                         framework="react-native"
                         ;;
                     *)
                         log_error "Invalid choice. Please select a number between 1 and 2."
+                        ;;
+                esac
+                ;;
+            fullstack)
+                echo "Available fullstack frameworks:"
+                echo "  1. MERN (MongoDB, Express, React, Node.js)"
+                echo "  2. MEAN (MongoDB, Express, Angular, Node.js)"
+                echo "  3. Laravel + Vue"
+                echo ""
+                
+                read -p "Enter your choice (1-3): " framework_choice
+                
+                case "${framework_choice}" in
+                    1)
+                        framework="mern"
+                        ;;
+                    2)
+                        framework="mean"
+                        ;;
+                    3)
+                        framework="laravel-vue"
+                        ;;
+                    *)
+                        log_error "Invalid choice. Please select a number between 1 and 3."
                         ;;
                 esac
                 ;;
@@ -1397,219 +1491,68 @@ function start_guided_workflow {
     finish_step 2
     echo ""
     
-    # Special handling for Flutter projects
-    if [[ "${framework}" == "flutter" ]]; then
-        # Skip Git Repository step and directly create Flutter project
-        track_step 3 "Flutter Project Creation"
-        log_section "STEP ${CURRENT_STEP}: Flutter Project Creation"
-        log_info "Setting up a new Flutter project..."
-        
-        # Call the Flutter project creation implementation
-        if [[ -f "$PARENT_DIR/src/commands/flutter.sh" ]]; then
-            source "$PARENT_DIR/src/commands/flutter.sh" "create"
-            if [[ $? -ne 0 ]]; then
-                log_error "Flutter project creation failed."
-                finish_step 3 "failed"
-                return 1
-            fi
-        else
-            log_error "Flutter command script not found."
-            finish_step 3 "failed"
-            return 1
-        fi
-        
-        # Get the project directory that was created
-        local flutter_project_name=$(get_config "FLUTTER_PROJECT_NAME")
-        if [[ -n "${flutter_project_name}" && -d "${flutter_project_name}" ]]; then
-            log_info "Navigating to Flutter project directory: ${flutter_project_name}"
-            cd "${flutter_project_name}" || { 
-                log_error "Failed to change to ${flutter_project_name} directory."; 
-                finish_step 3 "failed";
-                return 1; 
-            }
-        fi
-        
-        log_info "Flutter project setup completed. Current directory: $(pwd)"
-        finish_step 3
-        
-        # Skip to Step 7 (Dependencies) as Steps 4-6 aren't applicable for new Flutter projects
-        track_step 4 "Project Structure"
-        log_info "Using Flutter default project structure."
-        finish_step 4
-        
-        track_step 5 "Environment Configuration"
-        log_info "Flutter projects use pubspec.yaml for configuration."
-        finish_step 5
-        
-        track_step 6 "Additional Settings"
-        log_info "No additional settings needed for new Flutter projects."
-        finish_step 6
-        
-        # Continue with dependencies step
-        track_step 7 "Installing Dependencies"
-        log_section "STEP ${CURRENT_STEP}: Installing Dependencies"
-        log_info "Installing dependencies for Flutter..."
-        
-        if [[ -f "pubspec.yaml" ]]; then
-            log_info "Running flutter pub get..."
-            run_command "flutter pub get" "${CURRENT_STEP}" "Installing Flutter dependencies"
-            log_success "Flutter dependencies installed successfully!"
-        else
-            log_warning "No pubspec.yaml found. Skipping dependency installation."
-        fi
-        
-        finish_step 7
-        
-        # Skip to Step 8 (Useful Commands)
-        track_step 8 "Useful Commands"
-        log_section "STEP ${CURRENT_STEP}: Useful Commands"
-        log_info "Here are some useful Flutter commands:"
-        log_info "1. flutter run - Run your Flutter app"
-        log_info "2. flutter build - Build your Flutter app for production"
-        log_info "3. flutter test - Run tests for your Flutter app"
-        log_info "4. flutter pub add [package] - Add a package dependency"
-        finish_step 8
-        
-        # Set the current project directory
-        CURRENT_PROJECT_DIR=$(pwd)
-    else
-        # Regular Git Repository flow for non-Flutter projects
-        track_step 3 "Project Source"
-        log_section "STEP ${CURRENT_STEP}: Project Source"
-        log_info "Now, provide the Git repository URL for your project."
+    # Step 3: Git Repository
+    track_step 3 "Project Source"
+    log_section "STEP ${CURRENT_STEP}: Project Source"
+    log_info "Now, provide the Git repository URL for your project."
 
-        # Ask user if they want to clone an existing repository or create a new one
-        local project_type=""
-        echo "Project Source Options:"
-        echo "  1. Existing repository (clone from Git)"
-        echo "  2. New project (create from scratch)"
-        echo ""
-        read -p "Select project source (1-2): " project_source_choice
-        
-        case "${project_source_choice}" in
-            1)
-                project_type="existing"
-                ;;
-            2)
-                project_type="new"
-                ;;
-            *)
-                log_warning "Invalid choice. Defaulting to new project."
-                project_type="new"
-                ;;
-        esac
-        
-        if [[ "${project_type}" == "existing" ]]; then
-            # Get repository URL for existing projects
-            local repo_url=""
-            while [[ -z "${repo_url}" ]]; do
-                read -p "Enter Git repository URL: " repo_url
-                if [[ -z "${repo_url}" ]]; then
-                    log_error "Repository URL cannot be empty. Please try again."
-                fi
-            done
-        else
-            log_info "Setting up a new ${framework} project."
-            
-            # For new projects, we'll create a local git repository
-            log_info "Your project will be initialized with a new Git repository."
+    local repo_url=""
+    while [[ -z "${repo_url}" ]]; do
+        read -p "Enter Git repository URL: " repo_url
+        if [[ -z "${repo_url}" ]]; then
+            log_error "Repository URL cannot be empty. Please try again."
         fi
-    fi
-    
+    done
+
     # Get parent directory of script for better path handling
     PARENT_PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
     log_info "Parent directory for project: ${PARENT_PROJECT_DIR}"
-    
-    # Get project name/directory
-    local project_name=""
-    while [[ -z "${project_name}" ]]; do
-        if [[ "${project_type}" == "existing" ]]; then
-            # Default to repository name for existing projects
-            local default_name=$(basename "${repo_url}" .git)
-            read -p "Enter project directory name (default: ${default_name}): " project_name
-            project_name=${project_name:-$default_name}
-        else
-            # For new projects, we must specify a name
-            read -p "Enter name for your new ${framework} project: " project_name
-            if [[ -z "${project_name}" ]]; then
-                log_error "Project name cannot be empty. Please try again."
-            fi
-        fi
-    done
-    
+
+    local clone_dir=""
+    read -p "Enter the directory name for cloning (leave empty for default): " clone_dir
+
     # Save current directory to return after check
     CURRENT_DIR=$(pwd)
-    
+
+    # Create a specific directory for the project in a logical location
+    if [[ -z "${clone_dir}" ]]; then
+        # Extract repo name from URL for default directory name
+        repo_name=$(basename "${repo_url}" .git)
+        clone_dir="${repo_name}"
+        log_info "Using default directory name: ${clone_dir}"
+    fi
+
     # Always use an absolute path for the project directory
-    PROJECT_ROOT="${PARENT_PROJECT_DIR}/${project_name}"
-    log_info "Project will be set up in: ${PROJECT_ROOT}"
-    
+    PROJECT_ROOT="${PARENT_PROJECT_DIR}/${clone_dir}"
+    log_info "Project will be cloned to: ${PROJECT_ROOT}"
+
     # Create the directory if it doesn't exist
     if [[ ! -d "${PROJECT_ROOT}" ]]; then
         mkdir -p "${PROJECT_ROOT}"
     fi
+
+    # Navigate to the project root and clone there
+    cd "${PROJECT_ROOT}" || { log_error "Failed to change to ${PROJECT_ROOT} directory."; return 1; }
+
+    # Before cloning, log the command that will be used
+    log_debug "About to clone repository: git clone '${repo_url}' ."
     
-    # Navigate to the project root
-    cd "${PROJECT_ROOT}" || { 
-        log_error "Failed to change to ${PROJECT_ROOT} directory."; 
-        return 1; 
+    # Now clone into the current directory with verbose logging
+    log_info "Cloning repository into ${PROJECT_ROOT}..."
+    run_command "git clone '${repo_url}' . --verbose" ${CURRENT_STEP} || { 
+        log_critical_error "Failed to clone repository. Check the URL and try again."; 
+        cd "${CURRENT_DIR}"
+        # Continue but mark step as failed
+        touch "${MARKER_DIR}/step${CURRENT_STEP}_failed"
     }
-    
-    if [[ "${project_type}" == "existing" ]]; then
-        # Clone the existing repository
-        log_info "Cloning repository into ${PROJECT_ROOT}..."
-        run_command "git clone '${repo_url}' . --verbose" ${CURRENT_STEP} || { 
-            log_critical_error "Failed to clone repository. Check the URL and try again."; 
-            cd "${CURRENT_DIR}"
-            # Continue but mark step as failed
-            touch "${MARKER_DIR}/step${CURRENT_STEP}_failed"
-        }
-    else
-        # Initialize a new git repository for new projects
-        log_info "Initializing new Git repository in ${PROJECT_ROOT}..."
-        run_command "git init" ${CURRENT_STEP} || {
-            log_warning "Failed to initialize Git repository. Continuing without version control.";
-        }
-        
-        # Create initial .gitignore file with common patterns
-        log_info "Creating default .gitignore file..."
-        cat > .gitignore << EOF
-# Dependencies
-node_modules/
-vendor/
-.env
-
-# Build outputs
-build/
-dist/
-*.pyc
-__pycache__/
-
-# IDE files
-.idea/
-.vscode/
-*.sublime-*
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-
-# OS files
-.DS_Store
-Thumbs.db
-EOF
-        
-        log_success "Created default .gitignore file"
-    fi
     
     finish_step 3
     
-    log_info "Project source setup completed. Current directory: $(pwd)"
+    log_info "Repository setup completed. Current directory: $(pwd)"
     log_info "Contents of current directory:"
     ls -la
     
-    # Run fix_nested_directories immediately after cloning or initializing
+    # Run fix_nested_directories immediately after cloning
     log_info "Checking for potential directory structure issues..."
     fix_nested_directories
     
@@ -1699,7 +1642,7 @@ EOF
                 echo "" >> .env
                 echo "# Application Settings" >> .env
                 echo "APP_NAME=${framework}-api" >> .env
-                echo "LOG_LEVEL=${is_production:+info}${is_production:-debug}" >> .env
+                echo "LOG_LEVEL=${DB_CONFIG_DONE:+info}${DB_CONFIG_DONE:-debug}" >> .env
             fi
             
             log_success "Created default .env file with basic Node.js configuration."
@@ -1732,146 +1675,6 @@ EOF
     # Make sure to properly finish this step before moving on
     finish_step 5
     log_info "Environment and database configuration completed. Moving to additional settings..."
-
-    # Check if we're working with Node.js backend project
-    if [[ "${framework}" == "nodejs" || "${framework}" == "mern" || "${framework}" == "mean" || "${framework}" == "laravel" ]]; then
-        # Ask if user wants to configure additional settings
-        if prompt_yesno "Would you like to configure additional settings for your application (SMTP, file uploads, etc.)?" "y"; then
-            log_info "Configuring additional application settings..."
-            
-            # SMTP Configuration
-            if prompt_yesno "Do you want to configure SMTP for email sending?" "y"; then
-                log_info "Please provide SMTP server details:"
-                
-                read -p "SMTP Host (e.g., smtp.gmail.com): " smtp_host
-                read -p "SMTP Port (e.g., 465 for SSL, 587 for TLS): " smtp_port
-                read -p "SMTP Username (email address): " smtp_user
-                read -p "SMTP Password: " smtp_pass
-                read -p "Mail From Address (usually same as SMTP Username): " mail_from
-                
-                # Add to .env
-                echo "" >> .env
-                echo "# Email Configuration" >> .env
-                echo "MAIL_MAILER=smtp" >> .env
-                echo "MAIL_HOST=${smtp_host}" >> .env
-                echo "MAIL_PORT=${smtp_port}" >> .env
-                echo "MAIL_USERNAME=${smtp_user}" >> .env
-                echo "MAIL_PASSWORD=${smtp_pass}" >> .env
-                echo "MAIL_FROM_ADDRESS=${mail_from}" >> .env
-                echo "MAIL_ENCRYPTION=tls" >> .env
-                
-                log_success "SMTP configuration added to .env"
-            fi
-            
-            # File Upload Configuration
-            if prompt_yesno "Do you want to configure file upload settings?" "y"; then
-                read -p "Maximum upload size in bytes (default: 5MB = 5242880): " upload_limit
-                upload_limit=${upload_limit:-5242880}
-                
-                echo "" >> .env
-                echo "# File Upload Configuration" >> .env
-                echo "UPLOAD_MAX_FILESIZE=${upload_limit}" >> .env
-                
-                log_success "File upload configuration added to .env"
-            fi
-            
-            # Frontend URL Configuration
-            if prompt_yesno "Do you want to configure a frontend URL for CORS?" "y"; then
-                read -p "Frontend URL (e.g., http://localhost:3000): " frontend_url
-                
-                echo "" >> .env
-                echo "# Frontend Configuration" >> .env
-                echo "FRONTEND_URL=${frontend_url}" >> .env
-                
-                log_success "Frontend URL configuration added to .env"
-            fi
-            
-            # Application Secret Key
-            if prompt_yesno "Do you want to add a custom application secret key?" "y"; then
-                read -p "Application Secret Key (leave empty to generate one): " app_key
-                
-                if [[ -z "${app_key}" ]]; then
-                    app_key=$(openssl rand -hex 16)
-                fi
-                
-                echo "" >> .env
-                echo "# Application Secret" >> .env
-                echo "APP_KEY=${app_key}" >> .env
-                
-                log_success "Application secret key added to .env"
-            fi
-            
-            # Any other custom environment variables
-            if prompt_yesno "Do you want to add any other custom environment variables?" "y"; then
-                local adding_vars="yes"
-                
-                # Add section header if it doesn't exist
-                if ! grep -q "# Custom Environment Variables" .env; then
-                    echo "" >> .env
-                    echo "# Custom Environment Variables" >> .env
-                fi
-                
-                while [[ "${adding_vars}" == "yes" ]]; do
-                    # Get variable name with validation feedback
-                    local valid_name=false
-                    while [[ "${valid_name}" == "false" ]]; do
-                        read -p "Variable name (must start with letter/underscore, use only letters/numbers/underscores): " var_name
-                        if validate_env_var_name "${var_name}"; then
-                            valid_name=true
-                        else
-                            log_error "Invalid variable name format."
-                            log_info "Examples of valid names: API_KEY, DATABASE_URL, MY_VARIABLE_123"
-                        fi
-                    done
-                    
-                    # Get variable value with validation
-                    local valid_value=false
-                    while [[ "${valid_value}" == "false" ]]; do
-                        read -p "Variable value: " var_value
-                        if validate_env_var_value "${var_value}"; then
-                            valid_value=true
-                        else
-                            log_error "Invalid value. Please avoid special characters: ; & | < > $"
-                        fi
-                    done
-                    
-                    # Add variable to .env file
-                    if add_env_var "${var_name}" "${var_value}" ".env"; then
-                        log_success "Variable ${var_name} added successfully"
-                    else
-                        log_error "Failed to add variable ${var_name}"
-                    fi
-                    
-                    if ! prompt_yesno "Add another variable?" "n"; then
-                        adding_vars="no"
-                    fi
-                done
-                
-                log_success "Custom environment variables configuration completed!"
-                
-                # Show summary of added variables (excluding sensitive ones)
-                echo "Added environment variables:"
-                echo "----------------------------------------------------"
-                grep "^[A-Za-z_][A-Za-z0-9_]*=" .env | grep -v "PASSWORD\|SECRET\|KEY" | 
-                    sed 's/\(.*PASSWORD.*=\).*/\1********/' | 
-                    sed 's/\(.*SECRET.*=\).*/\1********/' | 
-                    sed 's/\(.*KEY.*=\).*/\1********/'
-                echo "----------------------------------------------------"
-                log_info "Note: Sensitive values have been hidden for security"
-            fi
-            
-            # Show a summary of the configured environment
-            log_info "Here's a summary of your configured environment:"
-            echo "----------------------------------------------------"
-            cat .env | grep -v "PASSWORD\|SECRET\|PASS" | sed 's/\(.*PASSWORD.*=\).*/\1********/' | sed 's/\(.*SECRET.*=\).*/\1********/' | sed 's/\(.*PASS.*=\).*/\1********/'
-            echo "----------------------------------------------------"
-            log_info "Sensitive values have been hidden for security"
-            
-            log_success "Additional environment configuration completed!"
-        else
-            log_info "Skipping additional configuration. You can manually edit .env later if needed."
-        fi
-    fi
 
     # Step 6: General Environment Configuration
     track_step 6 "Additional Environment Settings"
@@ -2079,7 +1882,7 @@ EOF
     
     CURRENT_STEP=9
     # Completion
-    # clear  <- Remove this line
+    clear
     log_section "Project Setup Complete"
     log_success "Your development environment is ready!"
     log_info "Current working directory: $(pwd)"
@@ -2106,16 +1909,9 @@ EOF
             log_info "3. Run tests: npm run test"
             ;;
         flutter)
-            # Handle the flutter command directly
-            shift
-            # Always delegate to the flutter.sh script for all operations
-            if [[ -f "$PARENT_DIR/src/commands/flutter.sh" ]]; then
-                source "$PARENT_DIR/src/commands/flutter.sh" "$@"
-            else
-                log_error "Flutter command script not found."
-                exit 1
-            fi
-            exit $?
+            log_info "1. Run app in debug mode: flutter run"
+            log_info "2. Build for production: flutter build"
+            log_info "3. Test app: flutter test"
             ;;
         laravel)
             log_info "1. Start development server: php artisan serve"
@@ -2201,15 +1997,8 @@ function main {
             exit $?
             ;;
         flutter)
-            # Handle the flutter command directly
             shift
-            # Always delegate to the flutter.sh script for all operations
-            if [[ -f "$PARENT_DIR/src/commands/flutter.sh" ]]; then
-                source "$PARENT_DIR/src/commands/flutter.sh" "$@"
-            else
-                log_error "Flutter command script not found."
-                exit 1
-            fi
+            source "$PARENT_DIR/src/commands/flutter.sh" "$@"
             exit $?
             ;;
     esac
@@ -2222,6 +2011,7 @@ function main {
 
 # Execute main function with all arguments
 main "$@" 
+
 # Add this new function to your script
 function show_logs() {
     local log_type="$1"  # debug, error, info, step, or all
@@ -2275,68 +2065,106 @@ function show_step_logs() {
     fi
 } 
 
-# Function to validate environment variable name
-function validate_env_var_name() {
-    local var_name="$1"
+# Function to create a new Flutter project
+function create_flutter_project() {
+    local project_name=""
+    local org_id=""
     
-    # Check if name is empty
-    if [[ -z "${var_name}" ]]; then
+    # Check if Flutter is installed
+    if ! command -v flutter &> /dev/null; then
+        log_error "Flutter SDK not found. Please install Flutter first."
+        log_info "Visit https://flutter.dev/docs/get-started/install for installation instructions."
         return 1
     fi
     
-    # Check if name starts with a letter or underscore
-    if [[ ! "${var_name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-        return 1
-    fi
+    # First check if we have previously saved values from flutter.sh command
+    saved_project_name=$(get_config "FLUTTER_PROJECT_NAME")
+    saved_org_id=$(get_config "FLUTTER_ORG_ID")
     
-    return 0
-}
-
-# Function to validate environment variable value
-function validate_env_var_value() {
-    local var_value="$1"
-    
-    # Check for potentially dangerous characters - escape semicolon, ampersand, etc.
-    if [[ "${var_value}" =~ [\;\&\|\<\>\$] ]]; then
-        return 1
-    fi
-    
-    return 0
-}
-
-# Function to safely add environment variable
-function add_env_var() {
-    local var_name="$1"
-    local var_value="$2"
-    local env_file="$3"
-    
-    # Validate inputs
-    if ! validate_env_var_name "${var_name}"; then
-        log_error "Invalid environment variable name: ${var_name}"
-        log_info "Variable names must:"
-        log_info "- Start with a letter or underscore"
-        log_info "- Contain only letters, numbers, and underscores"
-        return 1
-    fi
-    
-    if ! validate_env_var_value "${var_value}"; then
-        log_error "Invalid environment variable value. Value contains unsafe characters."
-        return 1
-    fi
-    
-    # Check if variable already exists
-    if grep -q "^${var_name}=" "${env_file}"; then
-        log_warning "Variable ${var_name} already exists in ${env_file}"
-        read -p "Do you want to override it? (y/n): " override
-        if [[ "${override}" != "y" && "${override}" != "Y" ]]; then
-            return 0
+    if [[ -n "${saved_project_name}" && -n "${saved_org_id}" ]]; then
+        log_info "Found previously configured Flutter project details:"
+        log_info "Project name: ${saved_project_name}"
+        log_info "Organization ID: ${saved_org_id}"
+        
+        read -p "Would you like to use these values? (yes/no): " use_saved
+        if [[ "${use_saved}" == "yes" || "${use_saved}" == "y" ]]; then
+            project_name="${saved_project_name}"
+            org_id="${saved_org_id}"
+        else
+            # Clear saved values if not using them
+            set_config "FLUTTER_PROJECT_NAME" ""
+            set_config "FLUTTER_ORG_ID" ""
         fi
-        # Remove existing variable
-        sed -i "/^${var_name}=/d" "${env_file}"
     fi
     
-    # Add variable to file
-    echo "${var_name}=${var_value}" >> "${env_file}"
-    log_success "Added ${var_name} to ${env_file}"
+    # If we don't have values from saved config, prompt for them
+    if [[ -z "${project_name}" || -z "${org_id}" ]]; then
+        # Ask for project name with validation
+        log_section "Create Flutter Project"
+        log_info "Please provide the details for your new Flutter project."
+        echo ""
+        
+        # Prompt for project name with validation
+        while true; do
+            read -p "Enter project name (lowercase with underscores, e.g., my_app): " project_name
+            
+            # Validate project name (Flutter requires lowercase with underscores)
+            if [[ "${project_name}" =~ ^[a-z][a-z0-9_]*$ ]]; then
+                break
+            else
+                log_error "Invalid project name. Please use lowercase letters, numbers, and underscores only, starting with a letter."
+            fi
+        done
+        
+        # Prompt for organization ID with validation
+        while true; do
+            read -p "Enter organization ID (reverse domain, e.g., com.example): " org_id
+            
+            # Validate org ID (should be a reverse domain format)
+            if [[ "${org_id}" =~ ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$ ]]; then
+                break
+            else
+                log_error "Invalid organization ID. Please use reverse domain format (e.g., com.example)."
+            fi
+        done
+        
+        # Save the new values to config for future use
+        set_config "FLUTTER_PROJECT_NAME" "${project_name}"
+        set_config "FLUTTER_ORG_ID" "${org_id}"
+    fi
+
+    # Confirm the details
+    echo ""
+    log_info "You're about to create a Flutter project with the following details:"
+    log_info "Project name: ${project_name}"
+    log_info "Organization ID: ${org_id}"
+    
+    read -p "Proceed? (yes/no): " proceed
+    if [[ "${proceed}" != "yes" && "${proceed}" != "y" ]]; then
+        log_info "Operation cancelled."
+        return 0
+    fi
+    
+    # Create the Flutter project
+    log_info "Creating Flutter project..."
+    flutter create --org "${org_id}" "${project_name}"
+    
+    # Check if the project was created successfully
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to create Flutter project."
+        return 1
+    fi
+    
+    # Add a message about the next steps
+    log_success "Flutter project created successfully!"
+    log_info "Project directory: $(pwd)/${project_name}"
+    log_info ""
+    log_info "Next steps:"
+    log_info "1. Navigate to your project: cd ${project_name}"
+    log_info "2. Run your app: flutter run"
+    
+    # Set Flutter as the selected framework
+    set_config "SELECTED_FRAMEWORK" "flutter"
+    
     return 0
 } 
