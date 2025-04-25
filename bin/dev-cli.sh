@@ -841,76 +841,6 @@ function setup_db_configuration() {
             echo "DB_PASSWORD=${DB_PASSWORD}"
         } >> "${env_temp}"
         
-        # Framework-specific environment variables
-        case "${framework}" in
-            nodejs)
-                # Add other essential Node.js configuration if not already present
-                if ! grep -q "JWT_SECRET" "${env_temp}"; then
-                    {
-                        echo ""
-                        echo "# JWT Configuration"
-                        echo "JWT_SECRET=$(openssl rand -hex 32)"
-                        echo "JWT_EXPIRES_IN=24h"
-                    } >> "${env_temp}"
-                fi
-                
-                if ! grep -q "APP_NAME" "${env_temp}"; then
-                    {
-                        echo ""
-                        echo "# Application Settings"
-                        echo "APP_NAME=${framework}-api"
-                        echo "LOG_LEVEL=info"
-                    } >> "${env_temp}"
-                fi
-                
-                # MongoDB connection string if this is a MongoDB project
-                local use_mongodb=""
-                read -p "Are you using MongoDB? (y/n, default: n): " use_mongodb
-                use_mongodb=$(echo "${use_mongodb}" | tr '[:upper:]' '[:lower:]')
-                
-                if [[ "${use_mongodb}" == "y" || "${use_mongodb}" == "yes" ]]; then
-                    log_info "Setting up MongoDB connection..."
-                    local mongo_uri="mongodb://"
-                    
-                    if [[ -n "${DB_USER}" && -n "${DB_PASSWORD}" ]]; then
-                        mongo_uri="${mongo_uri}${DB_USER}:${DB_PASSWORD}@"
-                    fi
-                    
-                    mongo_uri="${mongo_uri}${DB_HOST}"
-                    
-                    if [[ -n "${DB_PORT}" ]]; then
-                        mongo_uri="${mongo_uri}:${DB_PORT}"
-                    fi
-                    
-                    if [[ -n "${DB_NAME}" ]]; then
-                        mongo_uri="${mongo_uri}/${DB_NAME}"
-                    fi
-                    
-                    echo "" >> "${env_temp}"
-                    echo "# MongoDB Configuration" >> "${env_temp}" 
-                    echo "MONGODB_URI=${mongo_uri}" >> "${env_temp}"
-                    echo "MONGODB_DB_NAME=${DB_NAME}" >> "${env_temp}"
-                    
-                    log_success "MongoDB configuration added to .env file"
-                else
-                    log_info "Skipping MongoDB configuration."
-                fi
-                ;;
-            laravel)
-                # Add Laravel-specific DB variables
-                {
-                    echo "DB_CONNECTION=mysql"
-                    echo "DB_DATABASE=${DB_NAME}"
-                    echo "DB_USERNAME=${DB_USER}"
-                    echo "DB_PASSWORD=${DB_PASSWORD}"
-                } >> "${env_temp}"
-                ;;
-            django)
-                # Django typically uses different variable names
-                echo "DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}" >> "${env_temp}"
-                ;;
-        esac
-        
         # Move temp file back to .env
         mv "${env_temp}" .env
         
@@ -1165,17 +1095,29 @@ function check_script_syntax() {
 # Modify the start_guided_workflow function to include explicit step tracking
 function start_guided_workflow {
     # Initialize step names for better logging
-    declare -A STEP_NAMES
-    STEP_NAMES[1]="Init and TechStack Selection"
-    STEP_NAMES[2]="Framework Selection"
-    STEP_NAMES[3]="Project Source"
-    STEP_NAMES[4]="Project Structure"
-    STEP_NAMES[5]="Environment and Database Configuration"
-    STEP_NAMES[6]="Additional Environment Settings"
-    STEP_NAMES[7]="Installing Dependencies"
-    STEP_NAMES[8]="Useful Commands"
-    STEP_NAMES[9]="Completion"
-    export STEP_NAMES
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS doesn't support declare -A, use a different approach
+        STEP_NAMES_1="Init and TechStack Selection"
+        STEP_NAMES_2="Framework Selection"
+        STEP_NAMES_3="Project Source"
+        STEP_NAMES_4="Project Structure"
+        STEP_NAMES_5="Environment and Database Configuration"
+        STEP_NAMES_6="Additional Environment Settings"
+        STEP_NAMES_7="Installing Dependencies"
+        STEP_NAMES_8="Useful Commands"
+        STEP_NAMES_9="Completion"
+    else
+        declare -A STEP_NAMES
+        STEP_NAMES[1]="Init and TechStack Selection"
+        STEP_NAMES[2]="Framework Selection"
+        STEP_NAMES[3]="Project Source"
+        STEP_NAMES[4]="Project Structure"
+        STEP_NAMES[5]="Environment and Database Configuration"
+        STEP_NAMES[6]="Additional Environment Settings"
+        STEP_NAMES[7]="Installing Dependencies"
+        STEP_NAMES[8]="Useful Commands"
+        STEP_NAMES[9]="Completion"
+    fi
     
     # Enable debug mode for verbose logging if needed
     if [[ "${DEBUG_CLI:-false}" == "true" ]]; then
@@ -1526,15 +1468,7 @@ EOF
                 echo "DB_PORT=5432" >> .env
                 echo "DB_NAME=${framework}_db" >> .env
                 echo "DB_USER=dbuser" >> .env
-                
-                # Generate a random password instead of hardcoded default
-                local random_password
-                if [[ "${DB_CONFIG_DONE}" == "true" ]]; then
-                    random_password=$(openssl rand -base64 12)
-                else
-                    random_password="dev_password"
-                fi
-                echo "DB_PASSWORD=${random_password}" >> .env
+                echo "DB_PASSWORD=dev_password" >> .env
                 
                 # Add JWT Secret for auth - always use a secure random value
                 echo "" >> .env
@@ -1549,34 +1483,23 @@ EOF
                 echo "" >> .env
                 echo "# Application Settings" >> .env
                 echo "APP_NAME=${framework}-api" >> .env
-                echo "LOG_LEVEL=${DB_CONFIG_DONE:+info}${DB_CONFIG_DONE:-debug}" >> .env
+                echo "LOG_LEVEL=debug" >> .env
             fi
             
             log_success "Created default .env file with basic Node.js configuration."
-            
-            # Export the DB_CONFIG_DONE flag to make it available globally
-            DB_CONFIG_DONE=true
-            export DB_CONFIG_DONE
-            log_debug "DB_CONFIG_DONE set to true after creating default .env file"
         else
             log_info "Found existing .env file."
             log_debug "Found existing .env file. DB_CONFIG_DONE=${DB_CONFIG_DONE}"
         fi
         
-        # Only ask to customize if .env was just created and DB_CONFIG_DONE is not already true
-        if [[ "${DB_CONFIG_DONE}" != "true" ]]; then
-            # Ask user if they want to customize the default configuration
-            if prompt_yesno "Would you like to customize the default environment settings?" "n"; then
-                setup_db_configuration
-            else
-                log_info "Using default environment configuration from .env file. You can modify this file later if needed."
-                DB_CONFIG_DONE=true
-                export DB_CONFIG_DONE
-                log_debug "DB_CONFIG_DONE set to true after declining custom config"
-            fi
-        else
-            log_debug "Skipping DB configuration prompt as DB_CONFIG_DONE is already true"
-        fi
+        # Always call setup_db_configuration for backend frameworks
+        log_info "Configuring database settings..."
+        setup_db_configuration "true"  # Force configuration for backend frameworks
+        
+        # Set DB_CONFIG_DONE flag
+        DB_CONFIG_DONE=true
+        export DB_CONFIG_DONE
+        log_debug "DB_CONFIG_DONE set to true after database configuration"
     fi
     
     # Make sure to properly finish this step before moving on
@@ -2045,12 +1968,12 @@ function validate_env_var_name() {
     # Check if name is empty
     if [[ -z "${var_name}" ]]; then
         return 1
-    }
+    fi
     
     # Check if name starts with a letter or underscore
     if [[ ! "${var_name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
         return 1
-    }
+    fi
     
     return 0
 }
@@ -2103,3 +2026,37 @@ function add_env_var() {
     log_success "Added ${var_name} to ${env_file}"
     return 0
 } 
+
+# Function to safely edit files using sed
+safe_sed() {
+    local pattern="$1"
+    local file="$2"
+    local temp_file=$(mktemp)
+    
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS sed requires different syntax
+        sed -e "${pattern}" "${file}" > "${temp_file}"
+    else
+        # Linux sed
+        sed -i "${pattern}" "${file}"
+        return
+    fi
+    
+    # For macOS, we need to move the temp file back
+    mv "${temp_file}" "${file}"
+}
+
+# Function to safely replace text in a file
+safe_replace() {
+    local search="$1"
+    local replace="$2"
+    local file="$3"
+    
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS sed requires different syntax
+        sed -i '' "s|${search}|${replace}|g" "${file}"
+    else
+        # Linux sed
+        sed -i "s|${search}|${replace}|g" "${file}"
+    fi
+}

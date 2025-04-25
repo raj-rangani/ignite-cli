@@ -128,10 +128,11 @@ function prompt_yesno() {
     while true; do
         read -p "$message [$prompt]: " response
         response=${response:-$default}
+        response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
         
-        if [[ ${response,,} =~ ^(yes|y)$ ]]; then
+        if [[ "${response}" =~ ^(yes|y)$ ]]; then
             return 0
-        elif [[ ${response,,} =~ ^(no|n)$ ]]; then
+        elif [[ "${response}" =~ ^(no|n)$ ]]; then
             return 1
         else
             log_error "Invalid response. Please enter y/n."
