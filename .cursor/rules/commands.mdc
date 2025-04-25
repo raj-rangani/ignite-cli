@@ -1,0 +1,18 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Available Commands
+
+The ignite-cli supports the following commands:
+
+- [developer.sh](mdc:src/commands/developer.sh): Select your developer role (mobile, backend, frontend)
+- [framework.sh](mdc:src/commands/framework.sh): Select a framework based on your role
+- [clone.sh](mdc:src/commands/clone.sh): Clone a Git repository
+- [structure.sh](mdc:src/commands/structure.sh): Generate project structure
+- [configure.sh](mdc:src/commands/configure.sh): Configure framework settings
+- [dependencies.sh](mdc:src/commands/dependencies.sh): Install dependencies
+- [command-list.sh](mdc:src/commands/command-list.sh): Show useful commands for selected framework
+
+Each command can be executed using the format: `dev-cli [COMMAND] [OPTIONS]`

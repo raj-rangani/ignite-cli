@@ -1,0 +1,16 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Main Entry Point
+
+The [dev-cli.sh](mdc:bin/dev-cli.sh) script is the main entry point for the ignite-cli tool. This script:
+
+1. Sources all utility modules
+2. Handles command-line arguments
+3. Dispatches to the appropriate command implementation
+4. Manages error handling and logging
+5. Provides step tracking functionality
+
+To run the CLI, use: `./bin/dev-cli.sh [COMMAND] [OPTIONS]` or create a symlink to make it globally available.

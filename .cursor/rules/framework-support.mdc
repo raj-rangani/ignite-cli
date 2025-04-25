@@ -1,0 +1,23 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Framework Support
+
+The ignite-cli supports various frameworks for different developer roles:
+
+## Mobile Development
+- Flutter
+- React Native
+
+## Backend Development
+- Node.js
+- Laravel
+
+## Frontend Development
+- React
+- Vue
+- Angular
+
+Framework-specific configurations and templates are located in the appropriate subdirectories of [src/templates/](mdc:src/templates).
