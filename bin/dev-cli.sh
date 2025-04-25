@@ -660,15 +660,7 @@ function setup_environment {
                     local continue_adding="yes"
                     while [[ "${continue_adding}" == "yes" ]]; do
                         read -p "Enter variable name: " var_name
-                        # Validate variable name format
-                        if [[ ! "${var_name}" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
-                            log_warning "Environment variable names should be uppercase and contain only letters, numbers, and underscores"
-                            log_warning "Example: DATABASE_URL, API_KEY, MAX_CONNECTIONS"
-                            read -p "Continue with this name? (yes/no): " continue_var
-                            if [[ "${continue_var}" != "yes" && "${continue_var}" != "y" ]]; then
-                                continue
-                            fi
-                        fi
+                        # Remove validation for variable name format
                         
                         read -p "Enter variable value: " var_value
                         echo "${var_name}=${var_value}" >> .env
@@ -1812,35 +1804,15 @@ EOF
                 fi
                 
                 while [[ "${adding_vars}" == "yes" ]]; do
-                    # Get variable name with validation feedback
-                    local valid_name=false
-                    while [[ "${valid_name}" == "false" ]]; do
-                        read -p "Variable name (must start with letter/underscore, use only letters/numbers/underscores): " var_name
-                        if validate_env_var_name "${var_name}"; then
-                            valid_name=true
-                        else
-                            log_error "Invalid variable name format."
-                            log_info "Examples of valid names: API_KEY, DATABASE_URL, MY_VARIABLE_123"
-                        fi
-                    done
+                    # Get variable name without validation
+                    read -p "Variable name: " var_name
                     
-                    # Get variable value with validation
-                    local valid_value=false
-                    while [[ "${valid_value}" == "false" ]]; do
-                        read -p "Variable value: " var_value
-                        if validate_env_var_value "${var_value}"; then
-                            valid_value=true
-                        else
-                            log_error "Invalid value. Please avoid special characters: ; & | < > $"
-                        fi
-                    done
+                    # Get variable value without validation
+                    read -p "Variable value: " var_value
                     
-                    # Add variable to .env file
-                    if add_env_var "${var_name}" "${var_value}" ".env"; then
-                        log_success "Variable ${var_name} added successfully"
-                    else
-                        log_error "Failed to add variable ${var_name}"
-                    fi
+                    # Add variable to .env file directly
+                    echo "${var_name}=${var_value}" >> ".env"
+                    log_success "Variable ${var_name} added successfully"
                     
                     if ! prompt_yesno "Add another variable?" "n"; then
                         adding_vars="no"
