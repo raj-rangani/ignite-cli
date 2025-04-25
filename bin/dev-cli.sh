@@ -1799,22 +1799,12 @@ EOF
         react|angular|vue|nodejs|mern|mean)
             # Check for package.json
             if [[ -f "package.json" ]]; then
-                # Check for different lock files to determine package manager
-                if [[ -f "yarn.lock" ]]; then
-                    log_info "Yarn lock file detected. Installing with yarn..."
-                    run_command "yarn install" "${CURRENT_STEP}" "Installing dependencies with yarn" || {
-                        log_warning "Yarn install failed, falling back to npm..."
-                        run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm (fallback)"
-                    }
-                elif [[ -f "pnpm-lock.yaml" ]]; then
-                    log_info "PNPM lock file detected. Installing with pnpm..."
-                    run_command "pnpm install" "${CURRENT_STEP}" "Installing dependencies with pnpm" || {
-                        log_warning "PNPM install failed, falling back to npm..."
-                        run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm (fallback)"
-                    }
-                else
+                # Check if npm is installed
+                if command -v npm &> /dev/null; then
                     log_info "Installing dependencies with npm..."
                     run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm"
+                else
+                    log_error "npm is not installed. Cannot install dependencies."
                 fi
             else
                 log_warning "No package.json found. Cannot install dependencies."
