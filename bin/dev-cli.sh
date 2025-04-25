@@ -1722,62 +1722,181 @@ EOF
         react|angular|vue|nodejs|mern|mean)
             # Check for package.json
             if [[ -f "package.json" ]]; then
-                # Check if npm is installed
-                if command -v npm &> /dev/null; then
-                    log_info "Installing dependencies with npm..."
-                    run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm"
+                # Check if Node.js and npm are installed
+                if command -v node &> /dev/null && command -v npm &> /dev/null; then
+                    log_info "Node.js and npm detected. Skipping automatic dependency installation to avoid delays."
+                    log_info "You can manually install dependencies after setup is complete using:"
+                    log_info "    cd $(pwd) && npm install"
                 else
-                    log_error "npm is not installed. Cannot install dependencies."
+                    log_warning "Node.js and/or npm are not installed on your system."
+                    log_info "To use this project, you'll need to install Node.js and npm first:"
+                    
+                    # Provide OS-specific installation instructions
+                    if [[ "$OSTYPE" == "darwin"* ]]; then
+                        # macOS instructions
+                        log_info "On macOS:"
+                        log_info "    Option 1: Install with Homebrew:"
+                        log_info "        brew install node"
+                        log_info "    Option 2: Download from the official website:"
+                        log_info "        https://nodejs.org/en/download/"
+                    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+                        # Ubuntu/Debian instructions
+                        log_info "On Ubuntu/Debian:"
+                        log_info "    sudo apt update"
+                        log_info "    sudo apt install nodejs npm"
+                        
+                        # Fedora/RHEL/CentOS instructions
+                        log_info "On Fedora/RHEL/CentOS:"
+                        log_info "    sudo dnf install nodejs npm"
+                    else
+                        # Generic instructions
+                        log_info "Please visit https://nodejs.org/en/download/ to download and install Node.js"
+                    fi
+                    
+                    log_info "After installing Node.js and npm, run:"
+                    log_info "    cd $(pwd) && npm install"
                 fi
+                
+                # Create a flag file indicating dependencies need to be installed
+                echo "Dependencies need to be installed manually" > .dependencies_needed
+                
+                # Create a package-lock.json file to prevent future auto-detection of yarn
+                touch package-lock.json
             else
                 log_warning "No package.json found. Cannot install dependencies."
             fi
             ;;
         laravel)
             if [[ -f "composer.json" ]]; then
-                log_info "Installing dependencies with composer..."
-                run_command "composer install" "${CURRENT_STEP}" "Installing dependencies with composer"
+                # Check if PHP and Composer are installed
+                if command -v php &> /dev/null && command -v composer &> /dev/null; then
+                    log_info "PHP and Composer detected. Skipping automatic dependency installation to avoid delays."
+                    log_info "You can manually install dependencies after setup is complete using:"
+                    log_info "    cd $(pwd) && composer install"
+                else
+                    log_warning "PHP and/or Composer are not installed on your system."
+                    log_info "To use this project, you'll need to install PHP and Composer first:"
+                    
+                    # Provide OS-specific installation instructions
+                    if [[ "$OSTYPE" == "darwin"* ]]; then
+                        # macOS instructions
+                        log_info "On macOS:"
+                        log_info "    Option 1: Install with Homebrew:"
+                        log_info "        brew install php composer"
+                        log_info "    Option 2: Download PHP from the official website:"
+                        log_info "        https://www.php.net/downloads"
+                        log_info "        Then install Composer: https://getcomposer.org/download/"
+                    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+                        # Ubuntu/Debian instructions
+                        log_info "On Ubuntu/Debian:"
+                        log_info "    sudo apt update"
+                        log_info "    sudo apt install php php-cli php-common php-mbstring php-xml php-zip unzip"
+                        log_info "    curl -sS https://getcomposer.org/installer | php"
+                        log_info "    sudo mv composer.phar /usr/local/bin/composer"
+                        log_info "    sudo chmod +x /usr/local/bin/composer"
+                    else
+                        # Generic instructions
+                        log_info "Please visit https://www.php.net/downloads to install PHP"
+                        log_info "Then visit https://getcomposer.org/download/ to install Composer"
+                    fi
+                    
+                    log_info "After installing PHP and Composer, run:"
+                    log_info "    cd $(pwd) && composer install"
+                fi
+                
+                # Create a flag file indicating dependencies need to be installed
+                echo "Dependencies need to be installed manually" > .dependencies_needed
             else
                 log_warning "No composer.json found. Cannot install dependencies."
             fi
             ;;
         flutter)
             if [[ -f "pubspec.yaml" ]]; then
-                log_info "Installing dependencies with flutter..."
-                run_command "flutter pub get" "${CURRENT_STEP}" "Installing dependencies with flutter"
+                # Check if Flutter is installed
+                if command -v flutter &> /dev/null; then
+                    log_info "Flutter detected. Skipping automatic dependency installation to avoid delays."
+                    log_info "You can manually install dependencies after setup is complete using:"
+                    log_info "    cd $(pwd) && flutter pub get"
+                else
+                    log_warning "Flutter is not installed on your system."
+                    log_info "To use this project, you'll need to install Flutter first:"
+                    
+                    # Provide OS-specific installation instructions
+                    if [[ "$OSTYPE" == "darwin"* ]]; then
+                        # macOS instructions
+                        log_info "On macOS:"
+                        log_info "    1. Download Flutter from https://flutter.dev/docs/get-started/install/macos"
+                        log_info "    2. Extract the file and add flutter to your PATH"
+                    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+                        # Linux instructions
+                        log_info "On Linux:"
+                        log_info "    1. Download Flutter from https://flutter.dev/docs/get-started/install/linux"
+                        log_info "    2. Extract the file and add flutter to your PATH"
+                    else
+                        # Generic instructions
+                        log_info "Please visit https://flutter.dev/docs/get-started/install to install Flutter"
+                    fi
+                    
+                    log_info "After installing Flutter, run:"
+                    log_info "    cd $(pwd) && flutter pub get"
+                fi
+                
+                # Create a flag file indicating dependencies need to be installed
+                echo "Dependencies need to be installed manually" > .dependencies_needed
             else
                 log_warning "No pubspec.yaml found. Cannot install dependencies."
             fi
             ;;
         django)
             if [[ -f "requirements.txt" ]]; then
-                log_info "Installing dependencies with pip..."
-                run_command "pip install -r requirements.txt" "${CURRENT_STEP}" "Installing dependencies with pip"
+                # Check if Python and pip are installed
+                if command -v python3 &> /dev/null && command -v pip3 &> /dev/null; then
+                    log_info "Python and pip detected. Skipping automatic dependency installation to avoid delays."
+                    log_info "You can manually install dependencies after setup is complete using:"
+                    log_info "    cd $(pwd) && pip3 install -r requirements.txt"
+                else
+                    log_warning "Python and/or pip are not installed on your system."
+                    log_info "To use this project, you'll need to install Python and pip first:"
+                    
+                    # Provide OS-specific installation instructions
+                    if [[ "$OSTYPE" == "darwin"* ]]; then
+                        # macOS instructions
+                        log_info "On macOS:"
+                        log_info "    Option 1: Install with Homebrew:"
+                        log_info "        brew install python"
+                        log_info "    Option 2: Download from the official website:"
+                        log_info "        https://www.python.org/downloads/"
+                    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+                        # Ubuntu/Debian instructions
+                        log_info "On Ubuntu/Debian:"
+                        log_info "    sudo apt update"
+                        log_info "    sudo apt install python3 python3-pip"
+                    else
+                        # Generic instructions
+                        log_info "Please visit https://www.python.org/downloads/ to install Python"
+                    fi
+                    
+                    log_info "After installing Python and pip, run:"
+                    log_info "    cd $(pwd) && pip3 install -r requirements.txt"
+                fi
+                
+                # Create a flag file indicating dependencies need to be installed
+                echo "Dependencies need to be installed manually" > .dependencies_needed
             else
                 log_warning "No requirements.txt found. Cannot install dependencies."
             fi
             ;;
         *)
-            log_warning "Unknown framework: ${framework}. Trying generic dependency installation..."
-            if [[ -f "package.json" ]]; then
-                log_info "Found package.json. Installing with npm..."
-                run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm"
-            elif [[ -f "composer.json" ]]; then
-                log_info "Found composer.json. Installing with composer..."
-                run_command "composer install" "${CURRENT_STEP}" "Installing dependencies with composer"
-            elif [[ -f "requirements.txt" ]]; then
-                log_info "Found requirements.txt. Installing with pip..."
-                run_command "pip install -r requirements.txt" "${CURRENT_STEP}" "Installing dependencies with pip"
-            else
-                log_error "No known dependency file found. Cannot install dependencies."
-            fi
+            log_warning "Unknown framework: ${framework}. Skipping dependency installation."
+            # Create a flag file indicating dependencies need to be installed
+            echo "Dependencies need to be installed manually" > .dependencies_needed
             ;;
     esac
 
     # Explicitly mark step as complete
-    log_success "Dependency installation completed!"
+    log_success "Dependency setup completed! Follow the instructions above for manual installation."
     finish_step 7
-    log_info "Dependencies installed. Moving to useful commands..."
+    log_info "Moving to useful commands..."
 
     # Step 8: Show Useful Commands
     track_step 8 "Useful Commands"
