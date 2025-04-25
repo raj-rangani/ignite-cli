@@ -991,22 +991,20 @@ function setup_db_configuration() {
     fi
 }
 
-# Validate the format and reachability of a Git repository URL
+# Better input validation for repository URL
 function validate_git_url() {
     local url="$1"
-    # Basic pattern matching for git URLs
-    if [[ "$url" =~ ^(https:\/\/|git@)[^/:]+[/:][^/]+\/[^/]+(\.git)?$ ]]; then
-        # Check if the repo is reachable
-        if git ls-remote "$url" &>/dev/null; then
-            return 0
-        else
-            log_error "Git repository is not reachable: $url"
-            return 2
-        fi
-    else
-        log_error "Invalid Git repository URL format: $url"
+    if [[ -z "$url" ]]; then
         return 1
     fi
+    
+    # Basic pattern matching for git URLs
+    if [[ "$url" =~ ^(https?|git|ssh)://[[:alnum:]_.-]+/[[:alnum:]_.-]+/[[:alnum:]_.-]+(\.git)?$ || 
+          "$url" =~ ^git@[[:alnum:]_.-]+:[[:alnum:]_.-]+/[[:alnum:]_.-]+(\.git)?$ ]]; then
+        return 0
+    fi
+    
+    return 1
 }
 
 # Function to detect and fix nested directories with the same name
@@ -1367,16 +1365,6 @@ function start_guided_workflow {
             read -p "Enter Git repository URL: " repo_url
             if [[ -z "${repo_url}" ]]; then
                 log_error "Repository URL cannot be empty. Please try again."
-            else
-                validate_git_url "${repo_url}"
-                result=$?
-                if [[ $result -eq 1 ]]; then
-                    log_error "Invalid repository URL format. Please enter a valid URL."
-                    repo_url=""
-                elif [[ $result -eq 2 ]]; then
-                    log_error "Repository is not reachable. Please check the URL or your network."
-                    repo_url=""
-                fi
             fi
         done
     else
@@ -1414,71 +1402,32 @@ function start_guided_workflow {
     PROJECT_ROOT="${PARENT_PROJECT_DIR}/${project_name}"
     log_info "Project will be set up in: ${PROJECT_ROOT}"
     
-    # --- PATCH START ---
-    if [[ "${project_type}" == "new" ]]; then
-        NODEJS_BOILERPLATE_REPO="https://github.com/hagopj13/node-express-boilerplate.git"
-        validate_git_url "${NODEJS_BOILERPLATE_REPO}"
-        if [[ $? -ne 0 ]]; then
-            log_error "Node.js boilerplate repository is invalid or unreachable. Aborting."
-            return 1
-        fi
-        case "${framework}" in
-            laravel)
-                if ! command -v composer &> /dev/null; then
-                    log_error "Composer is not installed. Please install Composer to create a Laravel project."
-                    return 1
-                fi
-                cd "${PARENT_PROJECT_DIR}" || { log_error "Failed to change to ${PARENT_PROJECT_DIR}"; return 1; }
-                run_command "composer create-project laravel/laravel \"${project_name}\"" ${CURRENT_STEP} "Scaffolding Laravel project"
-                cd "${PROJECT_ROOT}" || { log_error "Failed to change to ${PROJECT_ROOT} after scaffolding."; return 1; }
-                ;;
-            nodejs)
-                cd "${PARENT_PROJECT_DIR}" || { log_error "Failed to change to ${PARENT_PROJECT_DIR}"; return 1; }
-                log_info "Cloning Node.js boilerplate from ${NODEJS_BOILERPLATE_REPO}..."
-                run_command "git clone ${NODEJS_BOILERPLATE_REPO} \"${project_name}\"" ${CURRENT_STEP} "Cloning Node.js boilerplate"
-                cd "${PROJECT_ROOT}" || { log_error "Failed to change to ${PROJECT_ROOT} after cloning."; return 1; }
-                rm -rf .git
-                run_command "git init" ${CURRENT_STEP} "Initializing new git repo"
-                if [[ -f ".env.example" ]]; then
-                    cp .env.example .env
-                    log_success "Copied .env.example to .env"
-                else
-                    log_warning ".env.example not found in the boilerplate repo."
-                fi
-                ;;
-            *)
-                mkdir -p "${PROJECT_ROOT}"
-                cd "${PROJECT_ROOT}" || { log_error "Failed to change to ${PROJECT_ROOT}"; return 1; }
-                ;;
-        esac
-        log_success "Project initialized at: ${PROJECT_ROOT}"
-    else
-        # Existing project logic unchanged
-        if [[ ! -d "${PROJECT_ROOT}" ]]; then
-            mkdir -p "${PROJECT_ROOT}"
-        fi
-        cd "${PROJECT_ROOT}" || { 
-            log_error "Failed to change to ${PROJECT_ROOT} directory."; 
-            return 1; 
-        }
-        if [[ "${project_type}" == "existing" ]]; then
-            log_info "Cloning repository into ${PROJECT_ROOT}..."
-            run_command "git clone '${repo_url}' . --verbose" ${CURRENT_STEP} || { 
-                log_critical_error "Failed to clone repository. Check the URL and try again."; 
-                cd "${CURRENT_DIR}"
-                # Continue but mark step as failed
-                touch "${MARKER_DIR}/step${CURRENT_STEP}_failed"
-            }
-        fi
+    # Create the directory if it doesn't exist
+    if [[ ! -d "${PROJECT_ROOT}" ]]; then
+        mkdir -p "${PROJECT_ROOT}"
     fi
-
-    # Only now initialize git if not already present
-    if [[ ! -d .git ]]; then
-        log_info "Initializing new Git repository in $(pwd)..."
+    
+    # Navigate to the project root
+    cd "${PROJECT_ROOT}" || { 
+        log_error "Failed to change to ${PROJECT_ROOT} directory."; 
+        return 1; 
+    }
+    
+    if [[ "${project_type}" == "existing" ]]; then
+        # Clone the existing repository
+        log_info "Cloning repository into ${PROJECT_ROOT}..."
+        run_command "git clone '${repo_url}' . --verbose" ${CURRENT_STEP} || { 
+            log_critical_error "Failed to clone repository. Check the URL and try again."; 
+            cd "${CURRENT_DIR}"
+            # Continue but mark step as failed
+            touch "${MARKER_DIR}/step${CURRENT_STEP}_failed"
+        }
+    else
+        # Initialize a new git repository for new projects
+        log_info "Initializing new Git repository in ${PROJECT_ROOT}..."
         run_command "git init" ${CURRENT_STEP} || {
             log_warning "Failed to initialize Git repository. Continuing without version control.";
         }
-    fi
         
         # Create initial .gitignore file with common patterns
         log_info "Creating default .gitignore file..."
@@ -1510,7 +1459,529 @@ Thumbs.db
 EOF
         
         log_success "Created default .gitignore file"
-    # ... existing code ...
+    fi
+    
+    finish_step 3
+    
+    log_info "Project source setup completed. Current directory: $(pwd)"
+    log_info "Contents of current directory:"
+    ls -la
+    
+    # Run fix_nested_directories immediately after cloning or initializing
+    log_info "Checking for potential directory structure issues..."
+    fix_nested_directories
+    
+    # Step 4: Generate Project Structure
+    track_step 4 "Project Structure"
+    log_section "STEP ${CURRENT_STEP}: Project Structure"
+    log_info "Generating project structure for ${framework}..."
+    
+    # Get the current directory name to avoid nesting with the same name
+    current_dir_name=$(basename "$(pwd)")
+    # Use a different project name if it would create a nested directory with the same name
+    local structure_name="${current_dir_name}"
+    local structure_dir="."  # Use current directory instead of creating a subdirectory
+    
+    # Call structure generator with proper error trapping
+    log_debug "About to source structure generator: $PARENT_DIR/src/commands/structure.sh"
+    structure_output=$(safe_source "$PARENT_DIR/src/commands/structure.sh" --framework="${framework}" --name="${structure_name}" --dir="${structure_dir}" --role="${role}" 2>&1)
+    
+    log_debug "Structure generator output: ${structure_output}"
+    echo "$structure_output"
+    
+    finish_step 4
+    
+    # Extract project directory from output - improved pattern matching
+    PROJECT_DIR=$(echo "$structure_output" | grep -o "PROJECT_DIRECTORY:.*" | sed 's/PROJECT_DIRECTORY://' | tr -d '[:space:]')
+    
+    if [[ -n "$PROJECT_DIR" && -d "$PROJECT_DIR" && "$PROJECT_DIR" != "$(pwd)" ]]; then
+        log_info "Navigating to project directory: $PROJECT_DIR"
+        cd "$PROJECT_DIR" || { log_error "Failed to change to ${PROJECT_DIR} directory."; return 1; }
+    else
+        log_info "Using current directory for project structure"
+    fi
+    
+    # Record the current directory for later reference
+    CURRENT_PROJECT_DIR=$(pwd)
+    
+    # *** REORDERED STEPS: Setup Environment and DB first, then dependencies ***
+    
+    # Step 5: Environment and Database Configuration
+    track_step 5 "Environment and Database Configuration"
+    log_section "STEP ${CURRENT_STEP}: Environment and Database Configuration"
+    log_info "Setting up environment and database configuration for your ${framework} project..."
+    log_debug "Beginning Step 5 with DB_CONFIG_DONE=${DB_CONFIG_DONE}"
+    
+    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" || 
+          "${framework}" == "mern" || "${framework}" == "mean" ]]; then
+        
+        # Always create default .env file
+        if [[ ! -f ".env" ]]; then
+            log_info "Creating default .env file for ${framework} project..."
+            log_debug "No .env file found. Creating one with default values."
+            
+            echo "# Environment Configuration" > .env
+            echo "NODE_ENV=development" >> .env
+            
+            if [[ "${framework}" == "nodejs" || "${framework}" == "mern" || "${framework}" == "mean" ]]; then
+                echo "PORT=3000" >> .env
+                echo "API_PREFIX=/api/v1" >> .env
+                
+                # Add default database configuration for Node.js
+                echo "" >> .env
+                echo "# Database Configuration" >> .env
+                echo "DB_HOST=localhost" >> .env
+                echo "DB_PORT=5432" >> .env
+                echo "DB_NAME=${framework}_db" >> .env
+                echo "DB_USER=dbuser" >> .env
+                
+                # Generate a random password instead of hardcoded default
+                local random_password
+                if [[ "${DB_CONFIG_DONE}" == "true" ]]; then
+                    random_password=$(openssl rand -base64 12)
+                else
+                    random_password="dev_password"
+                fi
+                echo "DB_PASSWORD=${random_password}" >> .env
+                
+                # Add JWT Secret for auth - always use a secure random value
+                echo "" >> .env
+                echo "# JWT Configuration" >> .env
+                # Generate a strong random JWT secret
+                local jwt_secret
+                jwt_secret=$(openssl rand -hex 32)
+                echo "JWT_SECRET=${jwt_secret}" >> .env
+                echo "JWT_EXPIRES_IN=24h" >> .env
+                
+                # Add other common configuration
+                echo "" >> .env
+                echo "# Application Settings" >> .env
+                echo "APP_NAME=${framework}-api" >> .env
+                echo "LOG_LEVEL=${DB_CONFIG_DONE:+info}${DB_CONFIG_DONE:-debug}" >> .env
+            fi
+            
+            log_success "Created default .env file with basic Node.js configuration."
+            
+            # Export the DB_CONFIG_DONE flag to make it available globally
+            DB_CONFIG_DONE=true
+            export DB_CONFIG_DONE
+            log_debug "DB_CONFIG_DONE set to true after creating default .env file"
+        else
+            log_info "Found existing .env file."
+            log_debug "Found existing .env file. DB_CONFIG_DONE=${DB_CONFIG_DONE}"
+        fi
+        
+        # Only ask to customize if .env was just created and DB_CONFIG_DONE is not already true
+        if [[ "${DB_CONFIG_DONE}" != "true" ]]; then
+            # Ask user if they want to customize the default configuration
+            if prompt_yesno "Would you like to customize the default environment settings?" "n"; then
+                setup_db_configuration
+            else
+                log_info "Using default environment configuration from .env file. You can modify this file later if needed."
+                DB_CONFIG_DONE=true
+                export DB_CONFIG_DONE
+                log_debug "DB_CONFIG_DONE set to true after declining custom config"
+            fi
+        else
+            log_debug "Skipping DB configuration prompt as DB_CONFIG_DONE is already true"
+        fi
+    fi
+    
+    # Make sure to properly finish this step before moving on
+    finish_step 5
+    log_info "Environment and database configuration completed. Moving to additional settings..."
+
+    # Check if we're working with Node.js backend project
+    if [[ "${framework}" == "nodejs" || "${framework}" == "mern" || "${framework}" == "mean" || "${framework}" == "laravel" ]]; then
+        # Ask if user wants to configure additional settings
+        if prompt_yesno "Would you like to configure additional settings for your application (SMTP, file uploads, etc.)?" "y"; then
+            log_info "Configuring additional application settings..."
+            
+            # SMTP Configuration
+            if prompt_yesno "Do you want to configure SMTP for email sending?" "y"; then
+                log_info "Please provide SMTP server details:"
+                
+                read -p "SMTP Host (e.g., smtp.gmail.com): " smtp_host
+                read -p "SMTP Port (e.g., 465 for SSL, 587 for TLS): " smtp_port
+                read -p "SMTP Username (email address): " smtp_user
+                read -p "SMTP Password: " smtp_pass
+                read -p "Mail From Address (usually same as SMTP Username): " mail_from
+                
+                # Add to .env
+                echo "" >> .env
+                echo "# Email Configuration" >> .env
+                echo "MAIL_MAILER=smtp" >> .env
+                echo "MAIL_HOST=${smtp_host}" >> .env
+                echo "MAIL_PORT=${smtp_port}" >> .env
+                echo "MAIL_USERNAME=${smtp_user}" >> .env
+                echo "MAIL_PASSWORD=${smtp_pass}" >> .env
+                echo "MAIL_FROM_ADDRESS=${mail_from}" >> .env
+                echo "MAIL_ENCRYPTION=tls" >> .env
+                
+                log_success "SMTP configuration added to .env"
+            fi
+            
+            # File Upload Configuration
+            if prompt_yesno "Do you want to configure file upload settings?" "y"; then
+                read -p "Maximum upload size in bytes (default: 5MB = 5242880): " upload_limit
+                upload_limit=${upload_limit:-5242880}
+                
+                echo "" >> .env
+                echo "# File Upload Configuration" >> .env
+                echo "UPLOAD_MAX_FILESIZE=${upload_limit}" >> .env
+                
+                log_success "File upload configuration added to .env"
+            fi
+            
+            # Frontend URL Configuration
+            if prompt_yesno "Do you want to configure a frontend URL for CORS?" "y"; then
+                read -p "Frontend URL (e.g., http://localhost:3000): " frontend_url
+                
+                echo "" >> .env
+                echo "# Frontend Configuration" >> .env
+                echo "FRONTEND_URL=${frontend_url}" >> .env
+                
+                log_success "Frontend URL configuration added to .env"
+            fi
+            
+            # Application Secret Key
+            if prompt_yesno "Do you want to add a custom application secret key?" "y"; then
+                read -p "Application Secret Key (leave empty to generate one): " app_key
+                
+                if [[ -z "${app_key}" ]]; then
+                    app_key=$(openssl rand -hex 16)
+                fi
+                
+                echo "" >> .env
+                echo "# Application Secret" >> .env
+                echo "APP_KEY=${app_key}" >> .env
+                
+                log_success "Application secret key added to .env"
+            fi
+            
+            # Any other custom environment variables
+            if prompt_yesno "Do you want to add any other custom environment variables?" "y"; then
+                local adding_vars="yes"
+                
+                # Add section header if it doesn't exist
+                if ! grep -q "# Custom Environment Variables" .env; then
+                    echo "" >> .env
+                    echo "# Custom Environment Variables" >> .env
+                fi
+                
+                while [[ "${adding_vars}" == "yes" ]]; do
+                    # Get variable name with validation feedback
+                    local valid_name=false
+                    while [[ "${valid_name}" == "false" ]]; do
+                        read -p "Variable name (must start with letter/underscore, use only letters/numbers/underscores): " var_name
+                        if validate_env_var_name "${var_name}"; then
+                            valid_name=true
+                        else
+                            log_error "Invalid variable name format."
+                            log_info "Examples of valid names: API_KEY, DATABASE_URL, MY_VARIABLE_123"
+                        fi
+                    done
+                    
+                    # Get variable value with validation
+                    local valid_value=false
+                    while [[ "${valid_value}" == "false" ]]; do
+                        read -p "Variable value: " var_value
+                        if validate_env_var_value "${var_value}"; then
+                            valid_value=true
+                        else
+                            log_error "Invalid value. Please avoid special characters: ; & | < > $"
+                        fi
+                    done
+                    
+                    # Add variable to .env file
+                    if add_env_var "${var_name}" "${var_value}" ".env"; then
+                        log_success "Variable ${var_name} added successfully"
+                    else
+                        log_error "Failed to add variable ${var_name}"
+                    fi
+                    
+                    if ! prompt_yesno "Add another variable?" "n"; then
+                        adding_vars="no"
+                    fi
+                done
+                
+                log_success "Custom environment variables configuration completed!"
+                
+                # Show summary of added variables (excluding sensitive ones)
+                echo "Added environment variables:"
+                echo "----------------------------------------------------"
+                grep "^[A-Za-z_][A-Za-z0-9_]*=" .env | grep -v "PASSWORD\|SECRET\|KEY" | 
+                    sed 's/\(.*PASSWORD.*=\).*/\1********/' | 
+                    sed 's/\(.*SECRET.*=\).*/\1********/' | 
+                    sed 's/\(.*KEY.*=\).*/\1********/'
+                echo "----------------------------------------------------"
+                log_info "Note: Sensitive values have been hidden for security"
+            fi
+            
+            # Show a summary of the configured environment
+            log_info "Here's a summary of your configured environment:"
+            echo "----------------------------------------------------"
+            cat .env | grep -v "PASSWORD\|SECRET\|PASS" | sed 's/\(.*PASSWORD.*=\).*/\1********/' | sed 's/\(.*SECRET.*=\).*/\1********/' | sed 's/\(.*PASS.*=\).*/\1********/'
+            echo "----------------------------------------------------"
+            log_info "Sensitive values have been hidden for security"
+            
+            log_success "Additional environment configuration completed!"
+        else
+            log_info "Skipping additional configuration. You can manually edit .env later if needed."
+        fi
+    fi
+
+    # Step 6: General Environment Configuration
+    track_step 6 "Additional Environment Settings"
+    log_section "STEP ${CURRENT_STEP}: Additional Environment Settings"
+    log_info "Setting up additional environment configuration for ${framework}..."
+    
+    # Pass the DB_CONFIG_DONE flag to the configure script
+    export DB_CONFIG_DONE
+
+    # Try sourcing with error handling
+    if ! source "$PARENT_DIR/src/commands/configure.sh" --framework="${framework}" 2>/tmp/configure_errors; then
+        log_warning "Configure command had errors: $(cat /tmp/configure_errors)"
+        log_info "Using simplified environment configuration instead..."
+        
+        # Simplified environment setup as fallback
+        case "${framework}" in
+            nodejs|mern|mean)
+                # Ensure basic .env settings are present
+                if [[ ! -f ".env" ]]; then
+                    log_info "Creating basic .env file..."
+                    echo "# Environment Configuration" > .env
+                    echo "NODE_ENV=development" >> .env
+                    echo "PORT=3000" >> .env
+                    echo "API_PREFIX=/api/v1" >> .env
+                    echo "DB_HOST=localhost" >> .env
+                    echo "DB_PORT=5432" >> .env
+                    echo "DB_NAME=${framework}_db" >> .env
+                    echo "DB_USER=dbuser" >> .env
+                    echo "DB_PASSWORD=${DB_CONFIG_DONE:+${DB_CONFIG_DONE}dev_password}${DB_CONFIG_DONE:-dev_password}" >> .env
+                    echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+                    echo "JWT_EXPIRES_IN=24h" >> .env
+                    echo "APP_NAME=${framework}-api" >> .env
+                    echo "LOG_LEVEL=${DB_CONFIG_DONE:+info}${DB_CONFIG_DONE:-debug}" >> .env
+                fi
+                ;;
+            react|angular|vue)
+                # Frontend environment setup
+                if [[ ! -f ".env" ]]; then
+                    echo "# Environment Configuration" > .env
+                    echo "NODE_ENV=development" >> .env
+                    echo "REACT_APP_API_URL=http://localhost:3000/api" >> .env
+                fi
+                ;;
+        esac
+    fi
+    
+    # Properly finish step 6 with clear logging
+    finish_step 6
+    log_info "Additional environment settings completed. Moving to dependency installation..."
+
+    # Step 7: Install Dependencies - Fix to ensure this step is not skipped
+    track_step 7 "Installing Dependencies"
+    log_section "STEP ${CURRENT_STEP}: Installing Dependencies"
+    log_info "Installing dependencies for ${framework}..."
+
+    # Fix the bad substitution error by doing the file check separately
+    env_file_exists="false"
+    if [[ -f ".env" ]]; then
+        env_file_exists="true"
+    fi
+    log_debug "Beginning Step 7 with DB_CONFIG_DONE=${DB_CONFIG_DONE}, .env file exists: ${env_file_exists}"
+
+    # Before installing dependencies, make sure .env exists (one final check)
+    if [[ "${framework}" == "nodejs" || "${framework}" == "mern" || "${framework}" == "mean" ]] && [[ ! -f ".env" ]] && [[ "${DB_CONFIG_DONE}" != "true" ]]; then
+        log_warning "No .env file found before dependency installation. Creating one now..."
+        log_debug "Creating .env file in step 7 as none exists and DB_CONFIG_DONE=${DB_CONFIG_DONE}"
+        
+        # Simplified .env creation
+        log_info "Creating basic .env file..."
+        echo "# Environment Configuration" > .env
+        echo "NODE_ENV=development" >> .env
+        echo "PORT=3000" >> .env
+        echo "API_PREFIX=/api/v1" >> .env
+        echo "DB_HOST=localhost" >> .env
+        echo "DB_PORT=5432" >> .env
+        echo "DB_NAME=${framework}_db" >> .env
+        echo "DB_USER=dbuser" >> .env
+        echo "DB_PASSWORD=${DB_CONFIG_DONE:+${DB_CONFIG_DONE}dev_password}${DB_CONFIG_DONE:-dev_password}" >> .env
+        echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+        echo "JWT_EXPIRES_IN=24h" >> .env
+        echo "APP_NAME=${framework}-api" >> .env
+        echo "LOG_LEVEL=${DB_CONFIG_DONE:+info}${DB_CONFIG_DONE:-debug}" >> .env
+        
+        # Set the flag to prevent duplicate prompts
+        DB_CONFIG_DONE=true
+        export DB_CONFIG_DONE
+        log_debug "DB_CONFIG_DONE set to true after creating .env file in step 7"
+    else
+        log_debug "No need to create .env in step 7: .env file exists=${env_file_exists}, DB_CONFIG_DONE=${DB_CONFIG_DONE}"
+    fi
+
+    # DIRECT NPM INSTALL - Don't rely on detect_package_manager function
+    log_info "Installing ${framework} dependencies directly..."
+    case "${framework}" in
+        react|angular|vue|nodejs|mern|mean)
+            # Check for package.json
+            if [[ -f "package.json" ]]; then
+                # Check for different lock files to determine package manager
+                if [[ -f "yarn.lock" ]]; then
+                    log_info "Yarn lock file detected. Installing with yarn..."
+                    run_command "yarn install" "${CURRENT_STEP}" "Installing dependencies with yarn" || {
+                        log_warning "Yarn install failed, falling back to npm..."
+                        run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm (fallback)"
+                    }
+                elif [[ -f "pnpm-lock.yaml" ]]; then
+                    log_info "PNPM lock file detected. Installing with pnpm..."
+                    run_command "pnpm install" "${CURRENT_STEP}" "Installing dependencies with pnpm" || {
+                        log_warning "PNPM install failed, falling back to npm..."
+                        run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm (fallback)"
+                    }
+                else
+                    log_info "Installing dependencies with npm..."
+                    run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm"
+                fi
+            else
+                log_warning "No package.json found. Cannot install dependencies."
+            fi
+            ;;
+        laravel)
+            if [[ -f "composer.json" ]]; then
+                log_info "Installing dependencies with composer..."
+                run_command "composer install" "${CURRENT_STEP}" "Installing dependencies with composer"
+            else
+                log_warning "No composer.json found. Cannot install dependencies."
+            fi
+            ;;
+        flutter)
+            if [[ -f "pubspec.yaml" ]]; then
+                log_info "Installing dependencies with flutter..."
+                run_command "flutter pub get" "${CURRENT_STEP}" "Installing dependencies with flutter"
+            else
+                log_warning "No pubspec.yaml found. Cannot install dependencies."
+            fi
+            ;;
+        django)
+            if [[ -f "requirements.txt" ]]; then
+                log_info "Installing dependencies with pip..."
+                run_command "pip install -r requirements.txt" "${CURRENT_STEP}" "Installing dependencies with pip"
+            else
+                log_warning "No requirements.txt found. Cannot install dependencies."
+            fi
+            ;;
+        *)
+            log_warning "Unknown framework: ${framework}. Trying generic dependency installation..."
+            if [[ -f "package.json" ]]; then
+                log_info "Found package.json. Installing with npm..."
+                run_command "npm install" "${CURRENT_STEP}" "Installing dependencies with npm"
+            elif [[ -f "composer.json" ]]; then
+                log_info "Found composer.json. Installing with composer..."
+                run_command "composer install" "${CURRENT_STEP}" "Installing dependencies with composer"
+            elif [[ -f "requirements.txt" ]]; then
+                log_info "Found requirements.txt. Installing with pip..."
+                run_command "pip install -r requirements.txt" "${CURRENT_STEP}" "Installing dependencies with pip"
+            else
+                log_error "No known dependency file found. Cannot install dependencies."
+            fi
+            ;;
+    esac
+
+    # Explicitly mark step as complete
+    log_success "Dependency installation completed!"
+    finish_step 7
+    log_info "Dependencies installed. Moving to useful commands..."
+
+    # Step 8: Show Useful Commands
+    track_step 8 "Useful Commands"
+    log_section "STEP ${CURRENT_STEP}: Useful Commands"
+    log_info "Here are some useful commands for ${framework}:"
+    
+    # Call command-list command directly with the selected framework
+    source "$PARENT_DIR/src/commands/command-list.sh" --framework="${framework}" || {
+        log_warning "Command list had errors but continuing workflow..."
+    }
+    
+    # Check and fix any nested directory issues that might have occurred
+    log_info "Checking once more for directory structure issues..."
+    fix_nested_directories
+    
+    # Debug information before completion
+    log_info "Current working directory before completion: $(pwd)"
+    log_info "Directory contents before completion:"
+    ls -la
+    
+    finish_step 8
+    
+    # At the end, log completion status
+    log_debug "==== WORKFLOW COMPLETED ===="
+    log_debug "Step completion status:"
+    
+    for i in {1..8}; do
+        if [[ -f "${MARKER_DIR}/step${i}_complete" ]]; then
+            log_debug "  Step $i: COMPLETE"
+        elif [[ -f "${MARKER_DIR}/step${i}_failed" ]]; then
+            log_debug "  Step $i: FAILED"
+        else
+            log_debug "  Step $i: NOT REACHED"
+        fi
+    done
+    
+    log_debug "Final directory: $(pwd)"
+    log_debug "Final directory contents:"
+    ls -la >> "${DEBUG_LOG_FILE}"
+    
+    finish_step 9
+    
+    CURRENT_STEP=9
+    # Completion
+    # clear  <- Remove this line
+    log_section "Project Setup Complete"
+    log_success "Your development environment is ready!"
+    log_info "Current working directory: $(pwd)"
+    
+    # Show next steps
+    echo ""
+    log_info "Next Steps:"
+    framework=$(get_config "SELECTED_FRAMEWORK")
+    
+    case "${framework}" in
+        react)
+            log_info "1. Start development server: npm start"
+            log_info "2. Build for production: npm run build"
+            log_info "3. Run tests: npm test"
+            ;;
+        angular)
+            log_info "1. Start development server: ng serve"
+            log_info "2. Build for production: ng build --prod"
+            log_info "3. Generate components/services: ng generate"
+            ;;
+        vue)
+            log_info "1. Start development server: npm run serve"
+            log_info "2. Build for production: npm run build"
+            log_info "3. Run tests: npm run test"
+            ;;
+        flutter)
+            log_info "1. Run app in debug mode: flutter run"
+            log_info "2. Build for production: flutter build"
+            log_info "3. Test app: flutter test"
+            ;;
+        laravel)
+            log_info "1. Start development server: php artisan serve"
+            log_info "2. Run migrations: php artisan migrate"
+            log_info "3. Create controllers/models: php artisan make:controller"
+            ;;
+        nodejs)
+            log_info "1. Start server: npm start"
+            log_info "2. Run in development mode: npm run dev"
+            log_info "3. Run tests: npm test"
+            ;;
+    esac
+    
+    echo ""
+    log_info "Thank you for using Developer CLI Tool!"
 }
 
 # Main function to handle command routing
@@ -1603,4 +2074,70 @@ function show_step_logs() {
     else
         tail -n "${lines}" "${STEP_LOG_FILE}" | less
     fi
+} 
+
+# Function to validate environment variable name
+function validate_env_var_name() {
+    local var_name="$1"
+    
+    # Check if name is empty
+    if [[ -z "${var_name}" ]]; then
+        return 1
+    }
+    
+    # Check if name starts with a letter or underscore
+    if [[ ! "${var_name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        return 1
+    }
+    
+    return 0
+}
+
+# Function to validate environment variable value
+function validate_env_var_value() {
+    local var_value="$1"
+    
+    # Check for potentially dangerous characters
+    if [[ "${var_value}" =~ [;&|<>$] ]]; then
+        return 1
+    }
+    
+    return 0
+}
+
+# Function to safely add environment variable
+function add_env_var() {
+    local var_name="$1"
+    local var_value="$2"
+    local env_file="$3"
+    
+    # Validate inputs
+    if ! validate_env_var_name "${var_name}"; then
+        log_error "Invalid environment variable name: ${var_name}"
+        log_info "Variable names must:"
+        log_info "- Start with a letter or underscore"
+        log_info "- Contain only letters, numbers, and underscores"
+        return 1
+    fi
+    
+    if ! validate_env_var_value "${var_value}"; then
+        log_error "Invalid environment variable value. Value contains unsafe characters."
+        return 1
+    }
+    
+    # Check if variable already exists
+    if grep -q "^${var_name}=" "${env_file}"; then
+        log_warning "Variable ${var_name} already exists in ${env_file}"
+        read -p "Do you want to override it? (y/n): " override
+        if [[ "${override}" != "y" && "${override}" != "Y" ]]; then
+            return 0
+        fi
+        # Remove existing variable
+        sed -i "/^${var_name}=/d" "${env_file}"
+    fi
+    
+    # Add variable to file
+    echo "${var_name}=${var_value}" >> "${env_file}"
+    log_success "Added ${var_name} to ${env_file}"
+    return 0
 } 
