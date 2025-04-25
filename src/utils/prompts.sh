@@ -129,9 +129,12 @@ function prompt_yesno() {
         read -p "$message [$prompt]: " response
         response=${response:-$default}
         
-        if [[ ${response,,} =~ ^(yes|y)$ ]]; then
+        # Convert to lowercase using tr instead of ,, operator for better compatibility
+        response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
+        
+        if [[ $response =~ ^(yes|y)$ ]]; then
             return 0
-        elif [[ ${response,,} =~ ^(no|n)$ ]]; then
+        elif [[ $response =~ ^(no|n)$ ]]; then
             return 1
         else
             log_error "Invalid response. Please enter y/n."

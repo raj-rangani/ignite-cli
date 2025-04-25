@@ -293,14 +293,6 @@ function show_help {
     log_info ""
     log_info "Commands:"
     log_info "  start             Start the guided project setup workflow"
-    log_info "  developer         Select your developer role"
-    log_info "  framework         Select a framework for your role"
-    log_info "  clone            Clone a Git repository"
-    log_info "  structure         Generate project structure"
-    log_info "  configure         Configure framework settings"
-    log_info "  dependencies      Install project dependencies"
-    log_info "  commands          Show useful commands for the selected framework"
-    log_info "  flutter           Flutter-specific operations (flavors, etc.)"
     log_info "  logs              View logs (options: debug|error|info|step|all) [num_lines]"
     log_info ""
     log_info "Options:"
@@ -310,8 +302,6 @@ function show_help {
     log_info ""
     log_info "Examples:"
     log_info "  dev-cli start"
-    log_info "  dev-cli developer --role=mobile"
-    log_info "  dev-cli flutter flavors --flavors=dev,qa,uat,prod"
     log_info "  dev-cli logs error 100"
 }
 
@@ -371,9 +361,7 @@ function generate_default_env_file() {
             echo "APP_NAME=${framework}-api"
             echo "LOG_LEVEL=${is_production:+info}${is_production:-debug}"
         } >> "${target_file}"
-    fi
-    
-    if [[ "${framework}" == "react" || "${framework}" == "vue" || "${framework}" == "angular" ]]; then
+    elif [[ "${framework}" == "react" || "${framework}" == "vue" || "${framework}" == "angular" ]]; then
         # Frontend-specific configuration
         {
             echo "REACT_APP_API_URL=http://localhost:3000/api"
@@ -853,76 +841,6 @@ function setup_db_configuration() {
             echo "DB_PASSWORD=${DB_PASSWORD}"
         } >> "${env_temp}"
         
-        # Framework-specific environment variables
-        case "${framework}" in
-            nodejs)
-                # Add other essential Node.js configuration if not already present
-                if ! grep -q "JWT_SECRET" "${env_temp}"; then
-                    {
-                        echo ""
-                        echo "# JWT Configuration"
-                        echo "JWT_SECRET=$(openssl rand -hex 32)"
-                        echo "JWT_EXPIRES_IN=24h"
-                    } >> "${env_temp}"
-                fi
-                
-                if ! grep -q "APP_NAME" "${env_temp}"; then
-                    {
-                        echo ""
-                        echo "# Application Settings"
-                        echo "APP_NAME=${framework}-api"
-                        echo "LOG_LEVEL=info"
-                    } >> "${env_temp}"
-                fi
-                
-                # MongoDB connection string if this is a MongoDB project
-                local use_mongodb=""
-                read -p "Are you using MongoDB? (y/n, default: n): " use_mongodb
-                use_mongodb=$(echo "${use_mongodb}" | tr '[:upper:]' '[:lower:]')
-                
-                if [[ "${use_mongodb}" == "y" || "${use_mongodb}" == "yes" ]]; then
-                    log_info "Setting up MongoDB connection..."
-                    local mongo_uri="mongodb://"
-                    
-                    if [[ -n "${DB_USER}" && -n "${DB_PASSWORD}" ]]; then
-                        mongo_uri="${mongo_uri}${DB_USER}:${DB_PASSWORD}@"
-                    fi
-                    
-                    mongo_uri="${mongo_uri}${DB_HOST}"
-                    
-                    if [[ -n "${DB_PORT}" ]]; then
-                        mongo_uri="${mongo_uri}:${DB_PORT}"
-                    fi
-                    
-                    if [[ -n "${DB_NAME}" ]]; then
-                        mongo_uri="${mongo_uri}/${DB_NAME}"
-                    fi
-                    
-                    echo "" >> "${env_temp}"
-                    echo "# MongoDB Configuration" >> "${env_temp}" 
-                    echo "MONGODB_URI=${mongo_uri}" >> "${env_temp}"
-                    echo "MONGODB_DB_NAME=${DB_NAME}" >> "${env_temp}"
-                    
-                    log_success "MongoDB configuration added to .env file"
-                else
-                    log_info "Skipping MongoDB configuration."
-                fi
-                ;;
-            laravel)
-                # Add Laravel-specific DB variables
-                {
-                    echo "DB_CONNECTION=mysql"
-                    echo "DB_DATABASE=${DB_NAME}"
-                    echo "DB_USERNAME=${DB_USER}"
-                    echo "DB_PASSWORD=${DB_PASSWORD}"
-                } >> "${env_temp}"
-                ;;
-            django)
-                # Django typically uses different variable names
-                echo "DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}" >> "${env_temp}"
-                ;;
-        esac
-        
         # Move temp file back to .env
         mv "${env_temp}" .env
         
@@ -1018,41 +936,27 @@ function fix_nested_directories() {
     local current_dir=$(pwd)
     local base_dir=$(basename "${current_dir}")
     local framework=$(get_config "SELECTED_FRAMEWORK")
-    local os_type=$(get_os_type)
     
     log_info "Checking directory structure in: ${current_dir}"
     log_info "Base directory name: ${base_dir}"
-    log_debug "Detected OS: ${os_type}"
     
     # Check if there's a directory with the same name as the current directory
-    if directory_exists "${base_dir}"; then
+    if [[ -d "${base_dir}" ]]; then
         log_warning "Detected potential nested directory issue: ${base_dir} inside ${current_dir}"
         log_info "Checking if this is a duplicate structure..."
         
         # Check if it looks like a template (more comprehensive checks)
-        if directory_exists "${base_dir}/src" || file_exists "${base_dir}/package.json" || file_exists "${base_dir}/.env.example" || 
-           file_exists "${base_dir}/composer.json" || directory_exists "${base_dir}/app" || directory_exists "${base_dir}/public"; then
+        if [[ -d "${base_dir}/src" || -f "${base_dir}/package.json" || -f "${base_dir}/.env.example" || 
+              -f "${base_dir}/composer.json" || -d "${base_dir}/app" || -d "${base_dir}/public" ]]; then
             log_info "Found nested project structure. Fixing directory structure..."
             
             # Create a temporary directory
-            local temp_dir=""
-            case "${os_type}" in
-                windows)
-                    # For Windows
-                    temp_dir="${TEMP:-/tmp}/dev-cli-temp-$(date +%s)"
-                    create_directory "${temp_dir}"
-                    ;;
-                *)
-                    # For Unix-like OS
-                    temp_dir=$(mktemp -d)
-                    ;;
-            esac
-            
+            local temp_dir=$(mktemp -d)
             TEMP_FILES+=("${temp_dir}")
             log_info "Created temporary directory: ${temp_dir}"
             
             # Check if the temp directory was created
-            if ! directory_exists "${temp_dir}"; then
+            if [[ ! -d "${temp_dir}" ]]; then
                 log_error "Failed to create temporary directory. Cannot fix nested structure."
                 return 1
             fi
@@ -1060,99 +964,55 @@ function fix_nested_directories() {
             # Move all files from nested directory to temp
             log_info "Moving files from ${base_dir} to temporary directory..."
             # First check if there are any files to move
-            if read_directory "${base_dir}" "true" > /dev/null 2>&1; then
-                # Try to move files, handle errors based on OS
-                case "${os_type}" in
-                    windows)
-                        # For Windows
-                        execute_command "xcopy \"${base_dir}\\*\" \"${temp_dir}\\\" /E /H /Y > nul 2>&1 || cp -R \"${base_dir}\"/* \"${temp_dir}\"/ 2>/dev/null" \
-                            "Failed to copy files on Windows"
-                        execute_command "xcopy \"${base_dir}\\.*\" \"${temp_dir}\\\" /E /H /Y > nul 2>&1 || cp -R \"${base_dir}\"/.[!.]* \"${temp_dir}\"/ 2>/dev/null" \
-                            "Failed to copy hidden files on Windows"
-                        ;;
-                    *)
-                        # For Unix-like OS
-                        if ! mv -f "${base_dir}"/* "${temp_dir}"/ 2>/dev/null; then
-                            log_warning "Some regular files could not be moved"
-                        fi
-                        
-                        # Try to move hidden files, handle errors
-                        if ! mv -f "${base_dir}"/.[!.]* "${temp_dir}"/ 2>/dev/null; then
-                            log_warning "Some hidden files could not be moved"
-                        fi
-                        ;;
-                esac
+            if ls -A "${base_dir}" >/dev/null 2>&1; then
+                # Try to move files, handle errors
+                if ! mv -f "${base_dir}"/* "${temp_dir}/" 2>/dev/null; then
+                    log_warning "Some regular files could not be moved"
+                fi
+                
+                # Try to move hidden files, handle errors
+                if ! mv -f "${base_dir}"/.[!.]* "${temp_dir}/" 2>/dev/null; then
+                    log_warning "Some hidden files could not be moved"
+                fi
             else
                 log_warning "Nested directory ${base_dir} is empty"
             fi
             
             # Remove now-empty nested directory
             log_info "Removing empty nested directory: ${base_dir}"
-            case "${os_type}" in
-                windows)
-                    # For Windows
-                    execute_command "rd /s /q \"${base_dir}\" 2>nul || rmdir \"${base_dir}\" 2>/dev/null" \
-                        "Failed to remove directory on Windows"
-                    ;;
-                *)
-                    # For Unix-like OS
-                    if ! rmdir "${base_dir}" 2>/dev/null; then 
-                        log_error "Failed to remove directory ${base_dir}. It may not be empty."
-                        # Try to list remaining files
-                        log_debug "Remaining files in ${base_dir}:"
-                        read_directory "${base_dir}" "true" >> "${DEBUG_LOG_FILE}"
-                        return 1
-                    fi
-                    ;;
-            esac
+            if ! rmdir "${base_dir}" 2>/dev/null; then 
+                log_error "Failed to remove directory ${base_dir}. It may not be empty."
+                # Try to list remaining files
+                log_debug "Remaining files in ${base_dir}:"
+                ls -la "${base_dir}" >> "${DEBUG_LOG_FILE}"
+                return 1
+            fi
             
             # Move files back from temp to current directory
             log_info "Moving files from temporary directory back to ${current_dir}..."
             # First check if there are any files to move back
-            if read_directory "${temp_dir}" "true" > /dev/null 2>&1; then
-                # Try to move files, handle errors based on OS
-                case "${os_type}" in
-                    windows)
-                        # For Windows
-                        execute_command "xcopy \"${temp_dir}\\*\" \".\\\" /E /H /Y > nul 2>&1 || cp -R \"${temp_dir}\"/* ./ 2>/dev/null" \
-                            "Failed to copy files back on Windows"
-                        execute_command "xcopy \"${temp_dir}\\.*\" \".\\\" /E /H /Y > nul 2>&1 || cp -R \"${temp_dir}\"/.[!.]* ./ 2>/dev/null" \
-                            "Failed to copy hidden files back on Windows"
-                        ;;
-                    *)
-                        # For Unix-like OS
-                        if ! mv -f "${temp_dir}"/* ./ 2>/dev/null; then
-                            log_warning "Some regular files could not be moved back"
-                        fi
-                        
-                        # Try to move hidden files, handle errors
-                        if ! mv -f "${temp_dir}"/.[!.]* ./ 2>/dev/null; then
-                            log_warning "Some hidden files could not be moved back"
-                        fi
-                        ;;
-                esac
+            if ls -A "${temp_dir}" >/dev/null 2>&1; then
+                # Try to move files, handle errors
+                if ! mv -f "${temp_dir}"/* ./ 2>/dev/null; then
+                    log_warning "Some regular files could not be moved back"
+                fi
+                
+                # Try to move hidden files, handle errors
+                if ! mv -f "${temp_dir}"/.[!.]* ./ 2>/dev/null; then
+                    log_warning "Some hidden files could not be moved back"
+                fi
             else
                 log_warning "Temporary directory is empty. No files to move back."
             fi
             
             # Remove temp directory
             log_info "Removing temporary directory: ${temp_dir}"
-            case "${os_type}" in
-                windows)
-                    # For Windows
-                    execute_command "rd /s /q \"${temp_dir}\" 2>nul || rmdir \"${temp_dir}\" 2>/dev/null" \
-                        "Failed to remove temporary directory on Windows"
-                    ;;
-                *)
-                    # For Unix-like OS
-                    if ! rmdir "${temp_dir}" 2>/dev/null; then
-                        log_warning "Failed to remove temporary directory. It may not be empty."
-                        # Try to list remaining files
-                        log_debug "Remaining files in ${temp_dir}:"
-                        read_directory "${temp_dir}" "true" >> "${DEBUG_LOG_FILE}"
-                    fi
-                    ;;
-            esac
+            if ! rmdir "${temp_dir}" 2>/dev/null; then
+                log_warning "Failed to remove temporary directory. It may not be empty."
+                # Try to list remaining files
+                log_debug "Remaining files in ${temp_dir}:"
+                ls -la "${temp_dir}" >> "${DEBUG_LOG_FILE}"
+            fi
             
             log_success "Fixed nested directory structure!"
         else
@@ -1235,17 +1095,29 @@ function check_script_syntax() {
 # Modify the start_guided_workflow function to include explicit step tracking
 function start_guided_workflow {
     # Initialize step names for better logging
-    declare -A STEP_NAMES
-    STEP_NAMES[1]="Init and TechStack Selection"
-    STEP_NAMES[2]="Framework Selection"
-    STEP_NAMES[3]="Project Source"
-    STEP_NAMES[4]="Project Structure"
-    STEP_NAMES[5]="Environment and Database Configuration"
-    STEP_NAMES[6]="Additional Environment Settings"
-    STEP_NAMES[7]="Installing Dependencies"
-    STEP_NAMES[8]="Useful Commands"
-    STEP_NAMES[9]="Completion"
-    export STEP_NAMES
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS doesn't support declare -A, use a different approach
+        STEP_NAMES_1="Init and TechStack Selection"
+        STEP_NAMES_2="Framework Selection"
+        STEP_NAMES_3="Project Source"
+        STEP_NAMES_4="Project Structure"
+        STEP_NAMES_5="Environment and Database Configuration"
+        STEP_NAMES_6="Additional Environment Settings"
+        STEP_NAMES_7="Installing Dependencies"
+        STEP_NAMES_8="Useful Commands"
+        STEP_NAMES_9="Completion"
+    else
+        declare -A STEP_NAMES
+        STEP_NAMES[1]="Init and TechStack Selection"
+        STEP_NAMES[2]="Framework Selection"
+        STEP_NAMES[3]="Project Source"
+        STEP_NAMES[4]="Project Structure"
+        STEP_NAMES[5]="Environment and Database Configuration"
+        STEP_NAMES[6]="Additional Environment Settings"
+        STEP_NAMES[7]="Installing Dependencies"
+        STEP_NAMES[8]="Useful Commands"
+        STEP_NAMES[9]="Completion"
+    fi
     
     # Enable debug mode for verbose logging if needed
     if [[ "${DEBUG_CLI:-false}" == "true" ]]; then
@@ -1404,66 +1276,85 @@ function start_guided_workflow {
                 finish_step 3 "failed"
                 return 1
             fi
+            
+            # Get the project directory that was created
+            local flutter_project_name=$(get_config "FLUTTER_PROJECT_NAME")
+            if [[ -n "${flutter_project_name}" && -d "${flutter_project_name}" ]]; then
+                log_info "Navigating to Flutter project directory: ${flutter_project_name}"
+                cd "${flutter_project_name}" || { 
+                    log_error "Failed to change to ${flutter_project_name} directory."; 
+                    finish_step 3 "failed";
+                    return 1; 
+                }
+            fi
+            
+            log_info "Flutter project setup completed. Current directory: $(pwd)"
+            finish_step 3
+            
+            # Skip to Step 7 (Dependencies) as Steps 4-6 aren't applicable for new Flutter projects
+            track_step 4 "Project Structure"
+            log_info "Using Flutter default project structure."
+            finish_step 4
+            
+            track_step 5 "Environment Configuration"
+            log_info "Flutter projects use pubspec.yaml for configuration."
+            finish_step 5
+            
+            track_step 6 "Additional Settings"
+            log_info "No additional settings needed for new Flutter projects."
+            finish_step 6
+            
+            # Continue with dependencies step
+            track_step 7 "Installing Dependencies"
+            log_section "STEP ${CURRENT_STEP}: Installing Dependencies"
+            log_info "Installing dependencies for Flutter..."
+            
+            if [[ -f "pubspec.yaml" ]]; then
+                log_info "Running flutter pub get..."
+                run_command "flutter pub get" "${CURRENT_STEP}" "Installing Flutter dependencies"
+                log_success "Flutter dependencies installed successfully!"
+            else
+                log_warning "No pubspec.yaml found. Skipping dependency installation."
+            fi
+            
+            finish_step 7
+            
+            # Skip to Step 8 (Useful Commands)
+            track_step 8 "Useful Commands"
+            log_section "STEP ${CURRENT_STEP}: Useful Commands"
+            log_info "Here are some useful Flutter commands:"
+            log_info "1. flutter run - Run your Flutter app"
+            log_info "2. flutter build - Build your Flutter app for production"
+            log_info "3. flutter test - Run tests for your Flutter app"
+            log_info "4. flutter pub add [package] - Add a package dependency"
+            finish_step 8
+            
+            # Important: Skip the rest of the workflow and exit after Flutter project setup
+            finish_step 9
+            
+            # Completion
+            log_section "Project Setup Complete"
+            log_success "Your Flutter development environment is ready!"
+            log_info "Current working directory: $(pwd)"
+            
+            # Show Flutter-specific next steps
+            echo ""
+            log_info "Next Steps:"
+            log_info "1. Run your app: flutter run"
+            log_info "2. Use flavor-specific commands if configured:"
+            log_info "   - flutter run --flavor dev -t lib/main_dev.dart"
+            log_info "   - flutter run --flavor prod -t lib/main_prod.dart"
+            
+            echo ""
+            log_info "Thank you for using Developer CLI Tool!"
+            
+            return 0  # Exit the guided workflow here
         else
             log_error "Flutter command script not found."
             finish_step 3 "failed"
             return 1
         fi
-        
-        # Get the project directory that was created
-        local flutter_project_name=$(get_config "FLUTTER_PROJECT_NAME")
-        if [[ -n "${flutter_project_name}" && -d "${flutter_project_name}" ]]; then
-            log_info "Navigating to Flutter project directory: ${flutter_project_name}"
-            cd "${flutter_project_name}" || { 
-                log_error "Failed to change to ${flutter_project_name} directory."; 
-                finish_step 3 "failed";
-                return 1; 
-            }
-        fi
-        
-        log_info "Flutter project setup completed. Current directory: $(pwd)"
-        finish_step 3
-        
-        # Skip to Step 7 (Dependencies) as Steps 4-6 aren't applicable for new Flutter projects
-        track_step 4 "Project Structure"
-        log_info "Using Flutter default project structure."
-        finish_step 4
-        
-        track_step 5 "Environment Configuration"
-        log_info "Flutter projects use pubspec.yaml for configuration."
-        finish_step 5
-        
-        track_step 6 "Additional Settings"
-        log_info "No additional settings needed for new Flutter projects."
-        finish_step 6
-        
-        # Continue with dependencies step
-        track_step 7 "Installing Dependencies"
-        log_section "STEP ${CURRENT_STEP}: Installing Dependencies"
-        log_info "Installing dependencies for Flutter..."
-        
-        if [[ -f "pubspec.yaml" ]]; then
-            log_info "Running flutter pub get..."
-            run_command "flutter pub get" "${CURRENT_STEP}" "Installing Flutter dependencies"
-            log_success "Flutter dependencies installed successfully!"
-        else
-            log_warning "No pubspec.yaml found. Skipping dependency installation."
-        fi
-        
-        finish_step 7
-        
-        # Skip to Step 8 (Useful Commands)
-        track_step 8 "Useful Commands"
-        log_section "STEP ${CURRENT_STEP}: Useful Commands"
-        log_info "Here are some useful Flutter commands:"
-        log_info "1. flutter run - Run your Flutter app"
-        log_info "2. flutter build - Build your Flutter app for production"
-        log_info "3. flutter test - Run tests for your Flutter app"
-        log_info "4. flutter pub add [package] - Add a package dependency"
-        finish_step 8
-        
-        # Set the current project directory
-        CURRENT_PROJECT_DIR=$(pwd)
+    # The rest of the existing code remains unchanged
     else
         # Regular Git Repository flow for non-Flutter projects
         track_step 3 "Project Source"
@@ -1473,39 +1364,46 @@ function start_guided_workflow {
         # Ask user if they want to clone an existing repository or create a new one
         local project_type=""
         echo "Project Source Options:"
-        echo "  1. Existing repository (clone from Git)"
-        echo "  2. New project (create from scratch)"
+        echo "  1. New Project"
+        echo "  2. Existing Project (Git Repository)"
         echo ""
-        read -p "Select project source (1-2): " project_source_choice
         
-        case "${project_source_choice}" in
-            1)
-                project_type="existing"
-                ;;
-            2)
-                project_type="new"
-                ;;
-            *)
-                log_warning "Invalid choice. Defaulting to new project."
-                project_type="new"
-                ;;
-        esac
-        
-        if [[ "${project_type}" == "existing" ]]; then
-            # Get repository URL for existing projects
-            local repo_url=""
-            while [[ -z "${repo_url}" ]]; do
-                read -p "Enter Git repository URL: " repo_url
-                if [[ -z "${repo_url}" ]]; then
-                    log_error "Repository URL cannot be empty. Please try again."
-                fi
-            done
-        else
-            log_info "Setting up a new ${framework} project."
+        # Add a while loop to handle invalid input
+        while [[ -z "${project_type}" ]]; do
+            read -p "Enter your choice (1-2): " project_choice
             
-            # For new projects, we'll create a local git repository
-            log_info "Your project will be initialized with a new Git repository."
-        fi
+            case "${project_choice}" in
+                1)
+                    project_type="new"
+                    ;;
+                2)
+                    project_type="existing"
+                    ;;
+                *)
+                    log_error "Invalid choice. Please select a number between 1 and 2."
+                    project_type=""
+                    ;;
+            esac
+        done
+    fi
+    
+    local repo_url=""
+    
+    if [[ "${project_type}" == "existing" ]]; then
+        log_info "Please provide the Git repository URL for your existing project."
+        
+        # Git repository URL is required
+        while [[ -z "${repo_url}" ]]; do
+            read -p "Enter Git repository URL: " repo_url
+            if [[ -z "${repo_url}" ]]; then
+                log_error "Repository URL cannot be empty. Please try again."
+            fi
+        done
+    else
+        log_info "Setting up a new ${framework} project."
+        
+        # For new projects, we'll create a local git repository
+        log_info "Your project will be initialized with a new Git repository."
     fi
     
     # Get parent directory of script for better path handling
@@ -1668,15 +1566,7 @@ EOF
                 echo "DB_PORT=5432" >> .env
                 echo "DB_NAME=${framework}_db" >> .env
                 echo "DB_USER=dbuser" >> .env
-                
-                # Generate a random password instead of hardcoded default
-                local random_password
-                if [[ "${DB_CONFIG_DONE}" == "true" ]]; then
-                    random_password=$(openssl rand -base64 12)
-                else
-                    random_password="dev_password"
-                fi
-                echo "DB_PASSWORD=${random_password}" >> .env
+                echo "DB_PASSWORD=dev_password" >> .env
                 
                 # Add JWT Secret for auth - always use a secure random value
                 echo "" >> .env
@@ -1695,30 +1585,19 @@ EOF
             fi
             
             log_success "Created default .env file with basic Node.js configuration."
-            
-            # Export the DB_CONFIG_DONE flag to make it available globally
-            DB_CONFIG_DONE=true
-            export DB_CONFIG_DONE
-            log_debug "DB_CONFIG_DONE set to true after creating default .env file"
         else
             log_info "Found existing .env file."
             log_debug "Found existing .env file. DB_CONFIG_DONE=${DB_CONFIG_DONE}"
         fi
         
-        # Only ask to customize if .env was just created and DB_CONFIG_DONE is not already true
-        if [[ "${DB_CONFIG_DONE}" != "true" ]]; then
-            # Ask user if they want to customize the default configuration
-            if prompt_yesno "Would you like to customize the default environment settings?" "n"; then
-                echo "LOG_LEVEL=${is_production:+info}${is_production:-debug}" >> .env
-            else
-                log_info "Using default environment configuration from .env file. You can modify this file later if needed."
-                DB_CONFIG_DONE=true
-                export DB_CONFIG_DONE
-                log_debug "DB_CONFIG_DONE set to true after declining custom config"
-            fi
-        else
-            log_debug "Skipping DB configuration prompt as DB_CONFIG_DONE is already true"
-        fi
+        # Always call setup_db_configuration for backend frameworks
+        log_info "Configuring database settings..."
+        setup_db_configuration "true"  # Force configuration for backend frameworks
+        
+        # Set DB_CONFIG_DONE flag
+        DB_CONFIG_DONE=true
+        export DB_CONFIG_DONE
+        log_debug "DB_CONFIG_DONE set to true after database configuration"
     fi
     
     # Make sure to properly finish this step before moving on
@@ -2068,16 +1947,9 @@ EOF
             log_info "3. Run tests: npm run test"
             ;;
         flutter)
-            # Handle the flutter command directly
-            shift
-            # Always delegate to the flutter.sh script for all operations
-            if [[ -f "$PARENT_DIR/src/commands/flutter.sh" ]]; then
-                source "$PARENT_DIR/src/commands/flutter.sh" "$@"
-            else
-                log_error "Flutter command script not found."
-                exit 1
-            fi
-            exit $?
+            log_info "1. Run app in debug mode: flutter run"
+            log_info "2. Build for production: flutter build"
+            log_info "3. Test app: flutter test"
             ;;
         laravel)
             log_info "1. Start development server: php artisan serve"
@@ -2124,57 +1996,6 @@ function main {
         start_guided_workflow
         exit 0
     fi
-    
-    # Handle command dispatch to specific command files
-    case "$1" in
-        developer)
-            shift
-            source "$PARENT_DIR/src/commands/developer.sh" "$@"
-            exit $?
-            ;;
-        framework)
-            shift
-            source "$PARENT_DIR/src/commands/framework.sh" "$@"
-            exit $?
-            ;;
-        clone)
-            shift
-            source "$PARENT_DIR/src/commands/clone.sh" "$@"
-            exit $?
-            ;;
-        structure)
-            shift
-            source "$PARENT_DIR/src/commands/structure.sh" "$@"
-            exit $?
-            ;;
-        configure)
-            shift
-            source "$PARENT_DIR/src/commands/configure.sh" "$@"
-            exit $?
-            ;;
-        dependencies)
-            shift
-            source "$PARENT_DIR/src/commands/dependencies.sh" "$@"
-            exit $?
-            ;;
-        commands)
-            shift
-            source "$PARENT_DIR/src/commands/command-list.sh" "$@"
-            exit $?
-            ;;
-        flutter)
-            # Handle the flutter command directly
-            shift
-            # Always delegate to the flutter.sh script for all operations
-            if [[ -f "$PARENT_DIR/src/commands/flutter.sh" ]]; then
-                source "$PARENT_DIR/src/commands/flutter.sh" "$@"
-            else
-                log_error "Flutter command script not found."
-                exit 1
-            fi
-            exit $?
-            ;;
-    esac
 
     # If any other command is provided, show help
     log_error "Unknown command: $1"
@@ -2184,6 +2005,7 @@ function main {
 
 # Execute main function with all arguments
 main "$@" 
+
 # Add this new function to your script
 function show_logs() {
     local log_type="$1"  # debug, error, info, step, or all
@@ -2258,8 +2080,8 @@ function validate_env_var_name() {
 function validate_env_var_value() {
     local var_value="$1"
     
-    # Check for potentially dangerous characters - escape semicolon, ampersand, etc.
-    if [[ "${var_value}" =~ [\;\&\|\<\>\$] ]]; then
+    # Check for potentially dangerous characters
+    if [[ "${var_value}" =~ [;&|<>$] ]]; then
         return 1
     fi
     
@@ -2302,3 +2124,37 @@ function add_env_var() {
     log_success "Added ${var_name} to ${env_file}"
     return 0
 } 
+
+# Function to safely edit files using sed
+safe_sed() {
+    local pattern="$1"
+    local file="$2"
+    local temp_file=$(mktemp)
+    
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS sed requires different syntax
+        sed -e "${pattern}" "${file}" > "${temp_file}"
+    else
+        # Linux sed
+        sed -i "${pattern}" "${file}"
+        return
+    fi
+    
+    # For macOS, we need to move the temp file back
+    mv "${temp_file}" "${file}"
+}
+
+# Function to safely replace text in a file
+safe_replace() {
+    local search="$1"
+    local replace="$2"
+    local file="$3"
+    
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS sed requires different syntax
+        sed -i '' "s|${search}|${replace}|g" "${file}"
+    else
+        # Linux sed
+        sed -i "s|${search}|${replace}|g" "${file}"
+    fi
+}

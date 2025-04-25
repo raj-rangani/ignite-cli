@@ -435,6 +435,28 @@ void main() {
 EOF
     done
     
+    # Remove main.dart file as it's not needed with flavors
+    if [[ -f "lib/main.dart" ]]; then
+        log_info "Removing main.dart file to avoid conflicts with flavor-specific main files..."
+        rm "lib/main.dart"
+        
+        # Update flavor-specific main files to not depend on main.dart
+        for flavor in "${selected_flavors[@]}"; do
+            cat > "lib/main_${flavor}.dart" << EOF
+import 'package:flutter/material.dart';
+import 'app.dart';
+import 'flavors.dart';
+
+void main() {
+  F.appFlavor = Flavor.${flavor};
+  runApp(const App());
+}
+EOF
+        done
+        
+        log_info "Successfully removed main.dart. Flavor-specific main files updated to be independent."
+    fi
+    
     log_success "Flutter flavors have been set up successfully!"
     log_info "You can now run your app with a specific flavor using:"
     
