@@ -991,20 +991,22 @@ function setup_db_configuration() {
     fi
 }
 
-# Better input validation for repository URL
+# Validate the format and reachability of a Git repository URL
 function validate_git_url() {
     local url="$1"
-    if [[ -z "$url" ]]; then
+    # Basic pattern matching for git URLs
+    if [[ "$url" =~ ^(https:\/\/|git@)[^/:]+[/:][^/]+\/[^/]+(\.git)?$ ]]; then
+        # Check if the repo is reachable
+        if git ls-remote "$url" &>/dev/null; then
+            return 0
+        else
+            log_error "Git repository is not reachable: $url"
+            return 2
+        fi
+    else
+        log_error "Invalid Git repository URL format: $url"
         return 1
     fi
-    
-    # Basic pattern matching for git URLs
-    if [[ "$url" =~ ^(https?|git|ssh)://[[:alnum:]_.-]+/[[:alnum:]_.-]+/[[:alnum:]_.-]+(\.git)?$ || 
-          "$url" =~ ^git@[[:alnum:]_.-]+:[[:alnum:]_.-]+/[[:alnum:]_.-]+(\.git)?$ ]]; then
-        return 0
-    fi
-    
-    return 1
 }
 
 # Function to detect and fix nested directories with the same name
@@ -1365,6 +1367,16 @@ function start_guided_workflow {
             read -p "Enter Git repository URL: " repo_url
             if [[ -z "${repo_url}" ]]; then
                 log_error "Repository URL cannot be empty. Please try again."
+            else
+                validate_git_url "${repo_url}"
+                result=$?
+                if [[ $result -eq 1 ]]; then
+                    log_error "Invalid repository URL format. Please enter a valid URL."
+                    repo_url=""
+                elif [[ $result -eq 2 ]]; then
+                    log_error "Repository is not reachable. Please check the URL or your network."
+                    repo_url=""
+                fi
             fi
         done
     else
@@ -1405,6 +1417,11 @@ function start_guided_workflow {
     # --- PATCH START ---
     if [[ "${project_type}" == "new" ]]; then
         NODEJS_BOILERPLATE_REPO="https://github.com/hagopj13/node-express-boilerplate.git"
+        validate_git_url "${NODEJS_BOILERPLATE_REPO}"
+        if [[ $? -ne 0 ]]; then
+            log_error "Node.js boilerplate repository is invalid or unreachable. Aborting."
+            return 1
+        fi
         case "${framework}" in
             laravel)
                 if ! command -v composer &> /dev/null; then
