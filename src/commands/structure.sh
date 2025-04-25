@@ -60,20 +60,299 @@ function create_laravel_project() {
     # Check if Composer is installed
     if ! command -v composer &> /dev/null; then
         log_error "Composer is not installed. Please install Composer first."
-        return 1
+        log_info "Creating basic Laravel project structure as fallback..."
+        create_laravel_fallback "${project_dir}" "${project_name}"
+        return 0
     fi
     
     # Create new Laravel project
     composer create-project laravel/laravel .
     
     if [ $? -ne 0 ]; then
-        log_error "Failed to create Laravel project"
-        return 1
+        log_error "Failed to create Laravel project with composer"
+        log_info "Creating basic Laravel project structure as fallback..."
+        create_laravel_fallback "${project_dir}" "${project_name}"
+        return 0
     fi
     
     log_success "Laravel project structure created successfully"
     echo "PROJECT_DIRECTORY:${project_dir}"
     return 0
+}
+
+# Function to create a basic Laravel project structure as fallback
+function create_laravel_fallback() {
+    local project_dir="$1"
+    local project_name="$2"
+    
+    log_info "Setting up basic Laravel project structure..."
+    
+    # Create basic directory structure
+    mkdir -p app/Http/Controllers
+    mkdir -p app/Models
+    mkdir -p app/Providers
+    mkdir -p bootstrap/cache
+    mkdir -p config
+    mkdir -p database/migrations
+    mkdir -p database/seeders
+    mkdir -p public
+    mkdir -p resources/views
+    mkdir -p routes
+    mkdir -p storage/app/public
+    mkdir -p storage/framework/cache
+    mkdir -p storage/framework/sessions
+    mkdir -p storage/framework/views
+    mkdir -p storage/logs
+    mkdir -p tests
+    
+    # Make storage and bootstrap/cache directories writable
+    chmod -R 775 storage
+    chmod -R 775 bootstrap/cache
+    
+    # Create basic .env file
+    cat > .env << EOF
+APP_NAME="${project_name}"
+APP_ENV=local
+APP_KEY=
+APP_DEBUG=true
+APP_URL=http://localhost
+
+LOG_CHANNEL=stack
+LOG_LEVEL=debug
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=${project_name}
+DB_USERNAME=root
+DB_PASSWORD=
+
+BROADCAST_DRIVER=log
+CACHE_DRIVER=file
+QUEUE_CONNECTION=sync
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+
+MEMCACHED_HOST=127.0.0.1
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+
+MAIL_MAILER=smtp
+MAIL_HOST=mailhog
+MAIL_PORT=1025
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+MAIL_FROM_ADDRESS=null
+MAIL_FROM_NAME="${project_name}"
+EOF
+    
+    # Create .env.example as a copy of .env
+    cp .env .env.example
+    
+    # Create a basic routes file
+    cat > routes/web.php << EOF
+<?php
+
+use Illuminate\\Support\\Facades\\Route;
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider within a group which
+| contains the "web" middleware group. Now create something great!
+|
+*/
+
+Route::get('/', function () {
+    return view('welcome');
+});
+EOF
+    
+    # Create a welcome view
+    mkdir -p resources/views
+    cat > resources/views/welcome.blade.php << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ config('app.name') }}</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f3f4f6;
+        }
+        .container {
+            max-width: 800px;
+            padding: 2rem;
+            background-color: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #ef3b2d;
+        }
+        p {
+            color: #718096;
+            margin-bottom: 1.5rem;
+        }
+        .links a {
+            display: inline-block;
+            margin: 0 0.5rem;
+            padding: 0.5rem 1rem;
+            background-color: #ef3b2d;
+            color: white;
+            text-decoration: none;
+            border-radius: 0.25rem;
+            transition: background-color 0.3s;
+        }
+        .links a:hover {
+            background-color: #cc2f25;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Laravel Fallback Project</h1>
+        <p>This is a basic Laravel project structure created by the Developer CLI Tool.</p>
+        <p>To complete the setup, please run the following commands:</p>
+        <pre>composer install
+php artisan key:generate</pre>
+        <div class="links">
+            <a href="https://laravel.com/docs">Documentation</a>
+            <a href="https://laracasts.com">Laracasts</a>
+            <a href="https://github.com/laravel/laravel">GitHub</a>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+    
+    # Create a basic composer.json file
+    cat > composer.json << EOF
+{
+    "name": "laravel/laravel",
+    "type": "project",
+    "description": "The Laravel Framework.",
+    "keywords": ["framework", "laravel"],
+    "license": "MIT",
+    "require": {
+        "php": "^8.0",
+        "laravel/framework": "^9.0"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.9.1",
+        "laravel/sail": "^1.0.1",
+        "mockery/mockery": "^1.4.4",
+        "phpunit/phpunit": "^9.5.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\\\": "app/",
+            "Database\\\\Factories\\\\": "database/factories/",
+            "Database\\\\Seeders\\\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\\\": "tests/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "Illuminate\\\\Foundation\\\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ],
+        "post-update-cmd": [
+            "@php artisan vendor:publish --tag=laravel-assets --ansi --force"
+        ],
+        "post-root-package-install": [
+            "@php -r \\"file_exists('.env') || copy('.env.example', '.env');\\"" 
+        ],
+        "post-create-project-cmd": [
+            "@php artisan key:generate --ansi"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "dont-discover": []
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
+EOF
+    
+    # Create a README.md file
+    cat > README.md << EOF
+# ${project_name}
+
+This is a Laravel project created using the Developer CLI Tool.
+
+## Setup
+
+1. Install Composer dependencies:
+\`\`\`bash
+composer install
+\`\`\`
+
+2. Generate an application key:
+\`\`\`bash
+php artisan key:generate
+\`\`\`
+
+3. Configure your database in the .env file.
+
+4. Run migrations:
+\`\`\`bash
+php artisan migrate
+\`\`\`
+
+5. Start the development server:
+\`\`\`bash
+php artisan serve
+\`\`\`
+
+## Project Structure
+
+This is a standard Laravel project with the following structure:
+
+- app/ - Contains your application's code
+- bootstrap/ - Contains files that bootstrap the framework
+- config/ - Contains configuration files
+- database/ - Contains database migrations and seeders
+- public/ - Contains publicly accessible files
+- resources/ - Contains views and frontend assets
+- routes/ - Contains route definitions
+- storage/ - Contains logs, compiled templates, and file uploads
+- tests/ - Contains test files
+
+## Additional Resources
+
+- [Laravel Documentation](https://laravel.com/docs)
+- [Laracasts](https://laracasts.com)
+- [Laravel GitHub Repository](https://github.com/laravel/laravel)
+EOF
+    
+    log_success "Basic Laravel project structure created successfully"
+    log_info "To complete setup, run 'composer install' and 'php artisan key:generate'"
+    echo "PROJECT_DIRECTORY:${project_dir}"
 }
 
 # Function to generate project structure
