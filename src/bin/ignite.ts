@@ -16,15 +16,19 @@ import { join } from "path";
 import * as fs from "fs";
 import * as clc from "colorette";
 import * as fsutils from "../fsutils";
-import client, { errorOut } from "..";
+import * as client from "..";
 import { configstore } from "../configstore";
+import { logger } from "../logger";
+import { errorOut } from "../errorOut";
+import * as figlet from "figlet";
+
 const args = process.argv.slice(2);
 let cmd: Command;
 
 function findAvailableLogFile(): string {
-  const candidates = ["firebase-debug.log"];
+  const candidates = ["ignite-debug.log"];
   for (let i = 1; i < 10; i++) {
-    candidates.push(`firebase-debug.${i}.log`);
+    candidates.push(`ignite-debug.${i}.log`);
   }
 
   for (const c of candidates) {
@@ -39,13 +43,18 @@ function findAvailableLogFile(): string {
         // File does not exist, which is fine
         return logFilename;
       }
-
-      // Any other error (EPERM, etc) means we won't be able to log to
-      // this file so we skip it.
     }
   }
 
-  throw new Error("Unable to obtain permissions for firebase-debug.log");
+  logger.debug("-".repeat(70));
+  logger.debug("Command:      ", process.argv.join(" "));
+  logger.debug("CLI Version:  ", pkg.version);
+  logger.debug("Platform:     ", process.platform);
+  logger.debug("Node Version: ", process.version);
+  logger.debug("Time:         ", new Date().toString());
+  logger.debug();
+
+  throw new Error("Unable to obtain permissions for ignite-debug.log");
 }
 
 const logFilename = findAvailableLogFile();
@@ -68,7 +77,7 @@ process.on("exit", (code) => {
     if (lastError > timestamp - 120000) {
       let help;
       if (code === 1 && cmd) {
-        help = "Having trouble? Try " + clc.bold("firebase [command] --help");
+        help = "Having trouble? Try " + clc.bold("ignite [command] --help");
       } else {
         help = "Having trouble? Try again or contact support with contents of ignite-debug.log";
       }
@@ -85,11 +94,21 @@ process.on("exit", (code) => {
 });
 
 process.on("uncaughtException", (err) => {
+  console.log("Uncaught exception");
   errorOut(err);
 });
 
 if (!args.length) {
-  client.cli.help();
+  console.log(
+    clc.redBright(
+      figlet.textSync("Ignite", {
+        font: "Speed",
+        horizontalLayout: "default",
+      })
+    )
+  );
+  console.log("\n");
+  client.cli.outputHelp();
 } else {
   cmd = client.cli.parse(process.argv);
 }
