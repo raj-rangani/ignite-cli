@@ -1470,85 +1470,48 @@ function start_guided_workflow {
         log_section "STEP ${CURRENT_STEP}: Project Source"
         log_info "Now, provide the Git repository URL for your project."
 
-        # Ask user if they want to clone an existing repository or create a new one
-        local project_type=""
-        echo "Project Source Options:"
-        echo "  1. Existing repository (clone from Git)"
-        echo "  2. New project (create from scratch)"
-        echo ""
-        read -p "Select project source (1-2): " project_source_choice
-        
-        case "${project_source_choice}" in
-            1)
-                project_type="existing"
-                ;;
-            2)
-                project_type="new"
-                ;;
-            *)
-                log_warning "Invalid choice. Defaulting to new project."
-                project_type="new"
-                ;;
-        esac
-        
-        if [[ "${project_type}" == "existing" ]]; then
-            # Get repository URL for existing projects
-            local repo_url=""
-            while [[ -z "${repo_url}" ]]; do
-                read -p "Enter Git repository URL: " repo_url
-                if [[ -z "${repo_url}" ]]; then
-                    log_error "Repository URL cannot be empty. Please try again."
-                fi
-            done
-        else
-            log_info "Setting up a new ${framework} project."
-            
-            # For new projects, we'll create a local git repository
-            log_info "Your project will be initialized with a new Git repository."
-        fi
-    fi
-    
-    # Get parent directory of script for better path handling
-    PARENT_PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
-    log_info "Parent directory for project: ${PARENT_PROJECT_DIR}"
-    
-    # Get project name/directory
-    local project_name=""
-    while [[ -z "${project_name}" ]]; do
-        if [[ "${project_type}" == "existing" ]]; then
-            # Default to repository name for existing projects
-            local default_name=$(basename "${repo_url}" .git)
-            read -p "Enter project directory name (default: ${default_name}): " project_name
-            project_name=${project_name:-$default_name}
-        else
-            # For new projects, we must specify a name
-            read -p "Enter name for your new ${framework} project: " project_name
-            if [[ -z "${project_name}" ]]; then
-                log_error "Project name cannot be empty. Please try again."
+        local repo_url=""
+        while [[ -z "${repo_url}" ]]; do
+            read -p "Enter Git repository URL: " repo_url
+            if [[ -z "${repo_url}" ]]; then
+                log_error "Repository URL cannot be empty. Please try again."
             fi
+        done
+
+        # Get parent directory of script for better path handling
+        PARENT_PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
+        log_info "Parent directory for project: ${PARENT_PROJECT_DIR}"
+
+        local clone_dir=""
+        read -p "Enter the directory name for cloning (leave empty for default): " clone_dir
+
+        # Save current directory to return after check
+        CURRENT_DIR=$(pwd)
+
+        # Create a specific directory for the project in a logical location
+        if [[ -z "${clone_dir}" ]]; then
+            # Extract repo name from URL for default directory name
+            repo_name=$(basename "${repo_url}" .git)
+            clone_dir="${repo_name}"
+            log_info "Using default directory name: ${clone_dir}"
         fi
-    done
-    
-    # Save current directory to return after check
-    CURRENT_DIR=$(pwd)
-    
-    # Always use an absolute path for the project directory
-    PROJECT_ROOT="${PARENT_PROJECT_DIR}/${project_name}"
-    log_info "Project will be set up in: ${PROJECT_ROOT}"
-    
-    # Create the directory if it doesn't exist
-    if [[ ! -d "${PROJECT_ROOT}" ]]; then
-        mkdir -p "${PROJECT_ROOT}"
-    fi
-    
-    # Navigate to the project root
-    cd "${PROJECT_ROOT}" || { 
-        log_error "Failed to change to ${PROJECT_ROOT} directory."; 
-        return 1; 
-    }
-    
-    if [[ "${project_type}" == "existing" ]]; then
-        # Clone the existing repository
+
+        # Always use an absolute path for the project directory
+        PROJECT_ROOT="${PARENT_PROJECT_DIR}/${clone_dir}"
+        log_info "Project will be cloned to: ${PROJECT_ROOT}"
+
+        # Create the directory if it doesn't exist
+        if [[ ! -d "${PROJECT_ROOT}" ]]; then
+            mkdir -p "${PROJECT_ROOT}"
+        fi
+
+        # Navigate to the project root and clone there
+        cd "${PROJECT_ROOT}" || { log_error "Failed to change to ${PROJECT_ROOT} directory."; return 1; }
+
+        # Before cloning, log the command that will be used
+        log_debug "About to clone repository: git clone '${repo_url}' ."
+        
+        # Now clone into the current directory with verbose logging
         log_info "Cloning repository into ${PROJECT_ROOT}..."
         run_command "git clone '${repo_url}' . --verbose" ${CURRENT_STEP} || { 
             log_critical_error "Failed to clone repository. Check the URL and try again."; 
@@ -1556,54 +1519,17 @@ function start_guided_workflow {
             # Continue but mark step as failed
             touch "${MARKER_DIR}/step${CURRENT_STEP}_failed"
         }
-    else
-        # Initialize a new git repository for new projects
-        log_info "Initializing new Git repository in ${PROJECT_ROOT}..."
-        run_command "git init" ${CURRENT_STEP} || {
-            log_warning "Failed to initialize Git repository. Continuing without version control.";
-        }
         
-        # Create initial .gitignore file with common patterns
-        log_info "Creating default .gitignore file..."
-        cat > .gitignore << EOF
-# Dependencies
-node_modules/
-vendor/
-.env
-
-# Build outputs
-build/
-dist/
-*.pyc
-__pycache__/
-
-# IDE files
-.idea/
-.vscode/
-*.sublime-*
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-
-# OS files
-.DS_Store
-Thumbs.db
-EOF
+        finish_step 3
         
-        log_success "Created default .gitignore file"
+        log_info "Repository setup completed. Current directory: $(pwd)"
+        log_info "Contents of current directory:"
+        ls -la
+        
+        # Run fix_nested_directories immediately after cloning
+        log_info "Checking for potential directory structure issues..."
+        fix_nested_directories
     fi
-    
-    finish_step 3
-    
-    log_info "Project source setup completed. Current directory: $(pwd)"
-    log_info "Contents of current directory:"
-    ls -la
-    
-    # Run fix_nested_directories immediately after cloning or initializing
-    log_info "Checking for potential directory structure issues..."
-    fix_nested_directories
     
     # Step 4: Generate Project Structure
     track_step 4 "Project Structure"
@@ -2245,70 +2171,4 @@ function show_step_logs() {
     else
         tail -n "${lines}" "${STEP_LOG_FILE}" | less
     fi
-} 
-
-# Function to validate environment variable name
-function validate_env_var_name() {
-    local var_name="$1"
-    
-    # Check if name is empty
-    if [[ -z "${var_name}" ]]; then
-        return 1
-    fi
-    
-    # Check if name starts with a letter or underscore
-    if [[ ! "${var_name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-        return 1
-    fi
-    
-    return 0
 }
-
-# Function to validate environment variable value
-function validate_env_var_value() {
-    local var_value="$1"
-    
-    # Check for potentially dangerous characters - escape semicolon, ampersand, etc.
-    if [[ "${var_value}" =~ [\;\&\|\<\>\$] ]]; then
-        return 1
-    fi
-    
-    return 0
-}
-
-# Function to safely add environment variable
-function add_env_var() {
-    local var_name="$1"
-    local var_value="$2"
-    local env_file="$3"
-    
-    # Validate inputs
-    if ! validate_env_var_name "${var_name}"; then
-        log_error "Invalid environment variable name: ${var_name}"
-        log_info "Variable names must:"
-        log_info "- Start with a letter or underscore"
-        log_info "- Contain only letters, numbers, and underscores"
-        return 1
-    fi
-    
-    if ! validate_env_var_value "${var_value}"; then
-        log_error "Invalid environment variable value. Value contains unsafe characters."
-        return 1
-    fi
-    
-    # Check if variable already exists
-    if grep -q "^${var_name}=" "${env_file}"; then
-        log_warning "Variable ${var_name} already exists in ${env_file}"
-        read -p "Do you want to override it? (y/n): " override
-        if [[ "${override}" != "y" && "${override}" != "Y" ]]; then
-            return 0
-        fi
-        # Remove existing variable
-        sed -i "/^${var_name}=/d" "${env_file}"
-    fi
-    
-    # Add variable to file
-    echo "${var_name}=${var_value}" >> "${env_file}"
-    log_success "Added ${var_name} to ${env_file}"
-    return 0
-} 
