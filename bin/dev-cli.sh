@@ -748,18 +748,18 @@ function setup_db_configuration() {
     log_debug "Entering setup_db_configuration function. DB_CONFIG_DONE=${DB_CONFIG_DONE}"
     
     local framework=$(get_config "SELECTED_FRAMEWORK")
+    local force_configuration="${1:-false}"
     
-    # Skip if already configured in this session
-    if [[ "${DB_CONFIG_DONE}" == "true" ]]; then
+    # Skip if already configured in this session and not forcing reconfiguration
+    if [[ "${DB_CONFIG_DONE}" == "true" && "${force_configuration}" != "true" ]]; then
         log_info "Database configuration already completed in this session."
-        log_debug "Skipping DB configuration as DB_CONFIG_DONE is true"
+        log_debug "Skipping DB configuration as DB_CONFIG_DONE is true and not forcing"
         return 0
     fi
     
     # For backend frameworks, we require database configuration
     local is_backend=false
-    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" || 
-          "${framework}" == "mern" || "${framework}" == "mean" ]]; then
+    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" ]]; then
         is_backend=true
     fi
     
@@ -831,8 +831,8 @@ function setup_db_configuration() {
         
         if grep -q "# Database Configuration" .env; then
             log_info "Updating existing database configuration..."
-            # Copy all lines except the database section to temp file
-            grep -v -A 10 "# Database Configuration" .env > "${env_temp}" || true
+            # Copy all lines before the database section to temp file
+            sed '/# Database Configuration/,$d' .env > "${env_temp}" || true
         else
             # Just copy the entire file for appending
             cp .env "${env_temp}"
@@ -851,7 +851,7 @@ function setup_db_configuration() {
         
         # Framework-specific environment variables
         case "${framework}" in
-            nodejs|mern|mean)
+            nodejs)
                 # Add other essential Node.js configuration if not already present
                 if ! grep -q "JWT_SECRET" "${env_temp}"; then
                     {
@@ -872,19 +872,36 @@ function setup_db_configuration() {
                 fi
                 
                 # MongoDB connection string if this is a MongoDB project
-                if prompt_yesno "Are you using MongoDB?" "n"; then
+                local use_mongodb=""
+                read -p "Are you using MongoDB? (y/n, default: n): " use_mongodb
+                use_mongodb=$(echo "${use_mongodb}" | tr '[:upper:]' '[:lower:]')
+                
+                if [[ "${use_mongodb}" == "y" || "${use_mongodb}" == "yes" ]]; then
+                    log_info "Setting up MongoDB connection..."
                     local mongo_uri="mongodb://"
+                    
                     if [[ -n "${DB_USER}" && -n "${DB_PASSWORD}" ]]; then
                         mongo_uri="${mongo_uri}${DB_USER}:${DB_PASSWORD}@"
                     fi
+                    
                     mongo_uri="${mongo_uri}${DB_HOST}"
+                    
                     if [[ -n "${DB_PORT}" ]]; then
                         mongo_uri="${mongo_uri}:${DB_PORT}"
                     fi
+                    
                     if [[ -n "${DB_NAME}" ]]; then
                         mongo_uri="${mongo_uri}/${DB_NAME}"
                     fi
+                    
+                    echo "" >> "${env_temp}"
+                    echo "# MongoDB Configuration" >> "${env_temp}" 
                     echo "MONGODB_URI=${mongo_uri}" >> "${env_temp}"
+                    echo "MONGODB_DB_NAME=${DB_NAME}" >> "${env_temp}"
+                    
+                    log_success "MongoDB configuration added to .env file"
+                else
+                    log_info "Skipping MongoDB configuration."
                 fi
                 ;;
             laravel)
@@ -905,54 +922,72 @@ function setup_db_configuration() {
         # Move temp file back to .env
         mv "${env_temp}" .env
         
+        # Display the generated .env file contents
+        log_info "Generated .env file with the following configuration:"
+        echo "-------------- .env file contents --------------"
+        cat .env
+        echo "------------------------------------------------"
+        
         log_success "Database configuration added to .env file"
         DB_CONFIG_DONE=true
         export DB_CONFIG_DONE
         log_debug "DB configuration completed. DB_CONFIG_DONE set to true"
     # For non-backend projects, make it optional
-    elif prompt_yesno "Would you like to configure database connection now?" "y"; then
-        log_info "Setting up database configuration..."
+    else
+        local configure_db=""
+        read -p "Would you like to configure database connection now? (y/n, default: y): " configure_db
+        configure_db=$(echo "${configure_db}" | tr '[:upper:]' '[:lower:]')
         
-        # Get database credentials
-        get_db_credentials
-        
-        # Create .env file if it doesn't exist
-        if [[ ! -f ".env" ]]; then
-            log_info "Creating .env file..."
-            generate_default_env_file "${framework}" ".env"
+        if [[ "${configure_db}" == "y" || "${configure_db}" == "yes" || -z "${configure_db}" ]]; then
+            log_info "Setting up database configuration..."
+            
+            # Get database credentials
+            get_db_credentials
+            
+            # Create .env file if it doesn't exist
+            if [[ ! -f ".env" ]]; then
+                log_info "Creating .env file..."
+                generate_default_env_file "${framework}" ".env"
+            fi
+            
+            # Add to .env file - always overwrite existing database config
+            local env_temp=$(mktemp)
+            TEMP_FILES+=("${env_temp}")
+            
+            if grep -q "# Database Configuration" .env; then
+                log_info "Updating existing database configuration..."
+                # Copy all lines before the database section to temp file
+                sed '/# Database Configuration/,$d' .env > "${env_temp}" || true
+            else
+                # Just copy the entire file for appending
+                cp .env "${env_temp}"
+            fi
+            
+            # Now add the new database configuration
+            {
+                echo ""
+                echo "# Database Configuration"
+                echo "DB_HOST=${DB_HOST}"
+                echo "DB_PORT=${DB_PORT}"
+                echo "DB_NAME=${DB_NAME}"
+                echo "DB_USER=${DB_USER}"
+                echo "DB_PASSWORD=${DB_PASSWORD}"
+            } >> "${env_temp}"
+            
+            # Move temp file back to .env
+            mv "${env_temp}" .env
+            
+            # Display the generated .env file contents
+            log_info "Generated .env file with the following configuration:"
+            echo "-------------- .env file contents --------------"
+            cat .env
+            echo "------------------------------------------------"
+            
+            log_success "Database configuration added to .env file"
+            DB_CONFIG_DONE=true
+            export DB_CONFIG_DONE
+            log_debug "DB configuration completed. DB_CONFIG_DONE set to true"
         fi
-        
-        # Add to .env file - always overwrite existing database config
-        local env_temp=$(mktemp)
-        TEMP_FILES+=("${env_temp}")
-        
-        if grep -q "# Database Configuration" .env; then
-            log_info "Updating existing database configuration..."
-            # Copy all lines except the database section to temp file
-            grep -v -A 10 "# Database Configuration" .env > "${env_temp}" || true
-        else
-            # Just copy the entire file for appending
-            cp .env "${env_temp}"
-        fi
-        
-        # Now add the new database configuration
-        {
-            echo ""
-            echo "# Database Configuration"
-            echo "DB_HOST=${DB_HOST}"
-            echo "DB_PORT=${DB_PORT}"
-            echo "DB_NAME=${DB_NAME}"
-            echo "DB_USER=${DB_USER}"
-            echo "DB_PASSWORD=${DB_PASSWORD}"
-        } >> "${env_temp}"
-        
-        # Move temp file back to .env
-        mv "${env_temp}" .env
-        
-        log_success "Database configuration added to .env file"
-        DB_CONFIG_DONE=true
-        export DB_CONFIG_DONE
-        log_debug "DB configuration completed. DB_CONFIG_DONE set to true"
     fi
 }
 
@@ -1066,8 +1101,7 @@ function fix_nested_directories() {
     fi
 
     # Check for missing .env file for backend frameworks - ALWAYS create one for Node.js projects
-    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" || 
-         "${framework}" == "mern" || "${framework}" == "mean" ]] && [[ "${DB_CONFIG_DONE}" != "true" ]]; then
+    if [[ "${framework}" == "nodejs" || "${framework}" == "laravel" || "${framework}" == "django" ]] && [[ "${DB_CONFIG_DONE}" != "true" ]]; then
         
         log_debug "Checking for .env file in backend framework. DB_CONFIG_DONE=${DB_CONFIG_DONE}"
         
@@ -1082,7 +1116,7 @@ function fix_nested_directories() {
             }
             
             log_success "Created .env file from template."
-            setup_db_configuration
+            setup_db_configuration "true"  # Always force configuration for clarity
         # No .env and no .env.example
         elif [[ ! -f ".env" ]]; then
             log_info "No .env file found. Setting up environment configuration..."
@@ -1092,19 +1126,22 @@ function fix_nested_directories() {
             
             log_success "Created basic .env file with default configuration."
             
-            # Set DB_CONFIG_DONE to true because we've created a default config
-            DB_CONFIG_DONE=true
-            export DB_CONFIG_DONE
-            log_debug "DB_CONFIG_DONE set to true after creating default .env file"
-            
             # Ask if user wants to customize the default database configuration
-            if prompt_yesno "A default database configuration has been created. Would you like to customize it?" "y"; then
-                setup_db_configuration
+            local customize_db=""
+            read -p "A default database configuration has been created. Would you like to customize it? (y/n, default: y): " customize_db
+            customize_db=$(echo "${customize_db}" | tr '[:upper:]' '[:lower:]')
+            
+            if [[ "${customize_db}" == "y" || "${customize_db}" == "yes" || -z "${customize_db}" ]]; then
+                # Force reconfiguration even if DB_CONFIG_DONE is true
+                setup_db_configuration "true"
             else
                 log_info "Using default database configuration. You can modify the .env file later if needed."
-                log_debug "User declined custom DB config. Continuing workflow with DB_CONFIG_DONE=${DB_CONFIG_DONE}"
+                # We still need to set DB_CONFIG_DONE to true
+                DB_CONFIG_DONE=true
+                export DB_CONFIG_DONE
+                log_debug "User declined custom DB config. DB_CONFIG_DONE set to true"
             fi
-            log_debug "Completed nested directory and environment setup. Proceeding to next step."
+            log_debug "Completed environment setup. Proceeding to next step."
         fi
     fi
 }
@@ -1137,7 +1174,7 @@ function check_script_syntax() {
 function start_guided_workflow {
     # Initialize step names for better logging
     declare -A STEP_NAMES
-    STEP_NAMES[1]="Developer Role Selection"
+    STEP_NAMES[1]="Init and TechStack Selection"
     STEP_NAMES[2]="Framework Selection"
     STEP_NAMES[3]="Project Source"
     STEP_NAMES[4]="Project Structure"
@@ -1153,8 +1190,9 @@ function start_guided_workflow {
         set_debug_mode "true"
     fi
     
-    clear
-    log_section "Developer CLI Tool - Guided Project Setup"
+    # Don't clear screen to maintain history
+    # clear  <- Remove this line
+    log_section "Ignite CLI Tool - Project Setup"
     log_info "Welcome to the project setup workflow. You will be guided through each step in sequence."
     echo ""
     
@@ -1168,21 +1206,20 @@ function start_guided_workflow {
     set_config "DEVELOPER_ROLE" ""
     set_config "SELECTED_FRAMEWORK" ""
     
-    # Step 1: Developer Role Selection
-    track_step 1 "Developer Role Selection"
-    log_section "STEP ${CURRENT_STEP}: Developer Role Selection"
-    log_info "Let's start by selecting your developer role for this project."
+    # Step 1: TechStack Selection (Previously Developer Role Selection)
+    track_step 1 "TechStack Selection"
+    log_section "STEP ${CURRENT_STEP}: TechStack Selection"
+    log_info "Let's start by selecting your tech stack for this project."
     
     local role=""
     while [[ -z "${role}" ]]; do
-        echo "Available roles:"
-        echo "  1. Frontend Developer"
-        echo "  2. Backend Developer"
-        echo "  3. Mobile Developer"
-        echo "  4. Full Stack Developer"
+        echo "Available Tech Stacks:"
+        echo "  1. Frontend"
+        echo "  2. Backend"
+        echo "  3. Mobile"
         echo ""
         
-        read -p "Enter your choice (1-4): " role_choice
+        read -p "Enter your choice (1-3): " role_choice
         
         case "${role_choice}" in
             1)
@@ -1194,18 +1231,15 @@ function start_guided_workflow {
             3)
                 role="mobile"
                 ;;
-            4)
-                role="fullstack"
-                ;;
             *)
-                log_error "Invalid choice. Please select a number between 1 and 4."
+                log_error "Invalid choice. Please select a number between 1 and 3."
                 role=""
                 ;;
         esac
     done
     
     set_config "DEVELOPER_ROLE" "${role}"
-    log_success "Developer role set to: ${role}"
+    log_success "Tech Stack set to: ${role}"
     finish_step 1
     echo ""
     
@@ -1285,30 +1319,6 @@ function start_guided_workflow {
                         ;;
                 esac
                 ;;
-            fullstack)
-                echo "Available fullstack frameworks:"
-                echo "  1. MERN (MongoDB, Express, React, Node.js)"
-                echo "  2. MEAN (MongoDB, Express, Angular, Node.js)"
-                echo "  3. Laravel + Vue"
-                echo ""
-                
-                read -p "Enter your choice (1-3): " framework_choice
-                
-                case "${framework_choice}" in
-                    1)
-                        framework="mern"
-                        ;;
-                    2)
-                        framework="mean"
-                        ;;
-                    3)
-                        framework="laravel-vue"
-                        ;;
-                    *)
-                        log_error "Invalid choice. Please select a number between 1 and 3."
-                        ;;
-                esac
-                ;;
         esac
     done
     
@@ -1317,68 +1327,147 @@ function start_guided_workflow {
     finish_step 2
     echo ""
     
-    # Step 3: Git Repository
+    # Step 3: Project Source (Modified to provide new or existing project option)
     track_step 3 "Project Source"
     log_section "STEP ${CURRENT_STEP}: Project Source"
-    log_info "Now, provide the Git repository URL for your project."
-
-    local repo_url=""
-    while [[ -z "${repo_url}" ]]; do
-        read -p "Enter Git repository URL: " repo_url
-        if [[ -z "${repo_url}" ]]; then
-            log_error "Repository URL cannot be empty. Please try again."
-        fi
+    
+    # New option to choose between new or existing project
+    local project_type=""
+    while [[ -z "${project_type}" ]]; do
+        echo "Project Source Options:"
+        echo "  1. New Project"
+        echo "  2. Existing Project (Git Repository)"
+        echo ""
+        
+        read -p "Enter your choice (1-2): " project_choice
+        
+        case "${project_choice}" in
+            1)
+                project_type="new"
+                ;;
+            2)
+                project_type="existing"
+                ;;
+            *)
+                log_error "Invalid choice. Please select a number between 1 and 2."
+                project_type=""
+                ;;
+        esac
     done
-
+    
+    local repo_url=""
+    
+    if [[ "${project_type}" == "existing" ]]; then
+        log_info "Please provide the Git repository URL for your existing project."
+        
+        # Git repository URL is required
+        while [[ -z "${repo_url}" ]]; do
+            read -p "Enter Git repository URL: " repo_url
+            if [[ -z "${repo_url}" ]]; then
+                log_error "Repository URL cannot be empty. Please try again."
+            fi
+        done
+    else
+        log_info "Setting up a new ${framework} project."
+        
+        # For new projects, we'll create a local git repository
+        log_info "Your project will be initialized with a new Git repository."
+    fi
+    
     # Get parent directory of script for better path handling
     PARENT_PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
     log_info "Parent directory for project: ${PARENT_PROJECT_DIR}"
-
-    local clone_dir=""
-    read -p "Enter the directory name for cloning (leave empty for default): " clone_dir
-
+    
+    # Get project name/directory
+    local project_name=""
+    while [[ -z "${project_name}" ]]; do
+        if [[ "${project_type}" == "existing" ]]; then
+            # Default to repository name for existing projects
+            local default_name=$(basename "${repo_url}" .git)
+            read -p "Enter project directory name (default: ${default_name}): " project_name
+            project_name=${project_name:-$default_name}
+        else
+            # For new projects, we must specify a name
+            read -p "Enter name for your new ${framework} project: " project_name
+            if [[ -z "${project_name}" ]]; then
+                log_error "Project name cannot be empty. Please try again."
+            fi
+        fi
+    done
+    
     # Save current directory to return after check
     CURRENT_DIR=$(pwd)
-
-    # Create a specific directory for the project in a logical location
-    if [[ -z "${clone_dir}" ]]; then
-        # Extract repo name from URL for default directory name
-        repo_name=$(basename "${repo_url}" .git)
-        clone_dir="${repo_name}"
-        log_info "Using default directory name: ${clone_dir}"
-    fi
-
+    
     # Always use an absolute path for the project directory
-    PROJECT_ROOT="${PARENT_PROJECT_DIR}/${clone_dir}"
-    log_info "Project will be cloned to: ${PROJECT_ROOT}"
-
+    PROJECT_ROOT="${PARENT_PROJECT_DIR}/${project_name}"
+    log_info "Project will be set up in: ${PROJECT_ROOT}"
+    
     # Create the directory if it doesn't exist
     if [[ ! -d "${PROJECT_ROOT}" ]]; then
         mkdir -p "${PROJECT_ROOT}"
     fi
-
-    # Navigate to the project root and clone there
-    cd "${PROJECT_ROOT}" || { log_error "Failed to change to ${PROJECT_ROOT} directory."; return 1; }
-
-    # Before cloning, log the command that will be used
-    log_debug "About to clone repository: git clone '${repo_url}' ."
     
-    # Now clone into the current directory with verbose logging
-    log_info "Cloning repository into ${PROJECT_ROOT}..."
-    run_command "git clone '${repo_url}' . --verbose" ${CURRENT_STEP} || { 
-        log_critical_error "Failed to clone repository. Check the URL and try again."; 
-        cd "${CURRENT_DIR}"
-        # Continue but mark step as failed
-        touch "${MARKER_DIR}/step${CURRENT_STEP}_failed"
+    # Navigate to the project root
+    cd "${PROJECT_ROOT}" || { 
+        log_error "Failed to change to ${PROJECT_ROOT} directory."; 
+        return 1; 
     }
+    
+    if [[ "${project_type}" == "existing" ]]; then
+        # Clone the existing repository
+        log_info "Cloning repository into ${PROJECT_ROOT}..."
+        run_command "git clone '${repo_url}' . --verbose" ${CURRENT_STEP} || { 
+            log_critical_error "Failed to clone repository. Check the URL and try again."; 
+            cd "${CURRENT_DIR}"
+            # Continue but mark step as failed
+            touch "${MARKER_DIR}/step${CURRENT_STEP}_failed"
+        }
+    else
+        # Initialize a new git repository for new projects
+        log_info "Initializing new Git repository in ${PROJECT_ROOT}..."
+        run_command "git init" ${CURRENT_STEP} || {
+            log_warning "Failed to initialize Git repository. Continuing without version control.";
+        }
+        
+        # Create initial .gitignore file with common patterns
+        log_info "Creating default .gitignore file..."
+        cat > .gitignore << EOF
+# Dependencies
+node_modules/
+vendor/
+.env
+
+# Build outputs
+build/
+dist/
+*.pyc
+__pycache__/
+
+# IDE files
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+EOF
+        
+        log_success "Created default .gitignore file"
+    fi
     
     finish_step 3
     
-    log_info "Repository setup completed. Current directory: $(pwd)"
+    log_info "Project source setup completed. Current directory: $(pwd)"
     log_info "Contents of current directory:"
     ls -la
     
-    # Run fix_nested_directories immediately after cloning
+    # Run fix_nested_directories immediately after cloning or initializing
     log_info "Checking for potential directory structure issues..."
     fix_nested_directories
     
@@ -1501,6 +1590,109 @@ function start_guided_workflow {
     # Make sure to properly finish this step before moving on
     finish_step 5
     log_info "Environment and database configuration completed. Moving to additional settings..."
+
+    # Check if we're working with Node.js backend project
+    if [[ "${framework}" == "nodejs" || "${framework}" == "mern" || "${framework}" == "mean" || "${framework}" == "laravel" ]]; then
+        # Ask if user wants to configure additional settings
+        if prompt_yesno "Would you like to configure additional settings for your application (SMTP, file uploads, etc.)?" "y"; then
+            log_info "Configuring additional application settings..."
+            
+            # SMTP Configuration
+            if prompt_yesno "Do you want to configure SMTP for email sending?" "y"; then
+                log_info "Please provide SMTP server details:"
+                
+                read -p "SMTP Host (e.g., smtp.gmail.com): " smtp_host
+                read -p "SMTP Port (e.g., 465 for SSL, 587 for TLS): " smtp_port
+                read -p "SMTP Username (email address): " smtp_user
+                read -p "SMTP Password: " smtp_pass
+                read -p "Mail From Address (usually same as SMTP Username): " mail_from
+                
+                # Add to .env
+                echo "" >> .env
+                echo "# Email Configuration" >> .env
+                echo "MAIL_MAILER=smtp" >> .env
+                echo "MAIL_HOST=${smtp_host}" >> .env
+                echo "MAIL_PORT=${smtp_port}" >> .env
+                echo "MAIL_USERNAME=${smtp_user}" >> .env
+                echo "MAIL_PASSWORD=${smtp_pass}" >> .env
+                echo "MAIL_FROM_ADDRESS=${mail_from}" >> .env
+                echo "MAIL_ENCRYPTION=tls" >> .env
+                
+                log_success "SMTP configuration added to .env"
+            fi
+            
+            # File Upload Configuration
+            if prompt_yesno "Do you want to configure file upload settings?" "y"; then
+                read -p "Maximum upload size in bytes (default: 5MB = 5242880): " upload_limit
+                upload_limit=${upload_limit:-5242880}
+                
+                echo "" >> .env
+                echo "# File Upload Configuration" >> .env
+                echo "UPLOAD_MAX_FILESIZE=${upload_limit}" >> .env
+                
+                log_success "File upload configuration added to .env"
+            fi
+            
+            # Frontend URL Configuration
+            if prompt_yesno "Do you want to configure a frontend URL for CORS?" "y"; then
+                read -p "Frontend URL (e.g., http://localhost:3000): " frontend_url
+                
+                echo "" >> .env
+                echo "# Frontend Configuration" >> .env
+                echo "FRONTEND_URL=${frontend_url}" >> .env
+                
+                log_success "Frontend URL configuration added to .env"
+            fi
+            
+            # Application Secret Key
+            if prompt_yesno "Do you want to add a custom application secret key?" "y"; then
+                read -p "Application Secret Key (leave empty to generate one): " app_key
+                
+                if [[ -z "${app_key}" ]]; then
+                    app_key=$(openssl rand -hex 16)
+                fi
+                
+                echo "" >> .env
+                echo "# Application Secret" >> .env
+                echo "APP_KEY=${app_key}" >> .env
+                
+                log_success "Application secret key added to .env"
+            fi
+            
+            # Any other custom environment variables
+            if prompt_yesno "Do you want to add any other custom environment variables?" "y"; then
+                local adding_vars="yes"
+                echo "" >> .env
+                echo "# Custom Environment Variables" >> .env
+                
+                while [[ "${adding_vars}" == "yes" ]]; do
+                    read -p "Variable name: " var_name
+                    read -p "Variable value: " var_value
+                    
+                    if [[ -n "${var_name}" ]]; then
+                        echo "${var_name}=${var_value}" >> .env
+                    fi
+                    
+                    if ! prompt_yesno "Add another variable?" "n"; then
+                        adding_vars="no"
+                    fi
+                done
+                
+                log_success "Custom environment variables added to .env"
+            fi
+            
+            # Show a summary of the configured environment
+            log_info "Here's a summary of your configured environment:"
+            echo "----------------------------------------------------"
+            cat .env | grep -v "PASSWORD\|SECRET\|PASS" | sed 's/\(.*PASSWORD.*=\).*/\1********/' | sed 's/\(.*SECRET.*=\).*/\1********/' | sed 's/\(.*PASS.*=\).*/\1********/'
+            echo "----------------------------------------------------"
+            log_info "Sensitive values have been hidden for security"
+            
+            log_success "Additional environment configuration completed!"
+        else
+            log_info "Skipping additional configuration. You can manually edit .env later if needed."
+        fi
+    fi
 
     # Step 6: General Environment Configuration
     track_step 6 "Additional Environment Settings"
@@ -1708,7 +1900,7 @@ function start_guided_workflow {
     
     CURRENT_STEP=9
     # Completion
-    clear
+    # clear  <- Remove this line
     log_section "Project Setup Complete"
     log_success "Your development environment is ready!"
     log_info "Current working directory: $(pwd)"
